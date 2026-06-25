@@ -30,9 +30,9 @@ RUN apk add --no-cache ca-certificates tzdata
 
 COPY --from=builder /build/xboard-node /usr/local/bin/xboard-node
 
-RUN mkdir -p /etc/xboard-node
+RUN mkdir -p /etc/XboardNode-Plus
 
-WORKDIR /etc/xboard-node
+WORKDIR /etc/XboardNode-Plus
 
 # Config can be provided via file mount OR environment variables.
 # Env var mode (no config file needed):
@@ -54,4 +54,4 @@ WORKDIR /etc/xboard-node
 #   logLevel / LOG_LEVEL   → log level
 
 ENTRYPOINT ["xboard-node"]
-CMD ["-c", "/etc/xboard-node/config.yml"]
+CMD ["-c", "/etc/XboardNode-Plus/config.yml"]

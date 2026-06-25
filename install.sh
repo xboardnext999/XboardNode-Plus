@@ -8,8 +8,9 @@ CYAN='\033[0;36m'
 BOLD='\033[1m'
 NC='\033[0m'
 
-APP_NAME="xboard-node"
-INSTALL_ROOT="/etc/xboard-node"
+APP_NAME="XboardNode-Plus"
+INSTALL_ROOT="/etc/XboardNode-Plus"
+LEGACY_INSTALL_ROOT="/etc/xboard-node"
 BACKUP_DIR="${INSTALL_ROOT}/backups"
 INSTALL_META="${INSTALL_ROOT}/install-meta.json"
 CONFIG_FILE="${INSTALL_ROOT}/config.yml"
@@ -160,7 +161,7 @@ trap cleanup_tmp EXIT
 usage() {
     cat <<'HELP'
 
-  xboard-node Installer
+  XboardNode-Plus Installer
 
   ACTIONS:
     install      Install or reconcile the configured deployment (default)
@@ -193,7 +194,7 @@ usage() {
     --gomemlimit        Runtime GOMEMLIMIT value, e.g. 256MiB
     --gogc              Runtime GOGC value, e.g. 50
     --force-reconfigure Overwrite an existing install even if mode/target changed
-    --purge             With uninstall, delete /etc/xboard-node too
+    --purge             With uninstall, delete /etc/XboardNode-Plus too
     --yes, -y           Non-interactive confirmation for destructive operations
 
   EXAMPLES:
@@ -354,6 +355,23 @@ ensure_systemd() {
     if [ ! -d /run/systemd/system ]; then
         log_error "This host does not appear to be running systemd"
         exit 1
+    fi
+}
+
+migrate_legacy_install_root() {
+    if [ "$INSTALL_ROOT" = "$LEGACY_INSTALL_ROOT" ]; then
+        return
+    fi
+    if [ -d "$INSTALL_ROOT" ]; then
+        if [ -d "$LEGACY_INSTALL_ROOT" ]; then
+            log_warn "Legacy config directory still exists: ${LEGACY_INSTALL_ROOT}"
+            log_warn "Keeping current install root: ${INSTALL_ROOT}"
+        fi
+        return
+    fi
+    if [ -d "$LEGACY_INSTALL_ROOT" ]; then
+        log_step "Migrating config directory: ${LEGACY_INSTALL_ROOT} -> ${INSTALL_ROOT}"
+        mv "$LEGACY_INSTALL_ROOT" "$INSTALL_ROOT"
     fi
 }
 
@@ -789,7 +807,7 @@ perform_uninstall() {
 perform_status() {
     detect_current_state
     echo
-    echo -e "${BOLD}xboard-node install status${NC}"
+    echo -e "${BOLD}${APP_NAME} install status${NC}"
     echo "  state:   ${CURRENT_STATE}"
     if [ -f "$INSTALL_META" ]; then
         echo "  meta:    ${INSTALL_META}"
@@ -830,6 +848,7 @@ main() {
     detect_os
     ensure_systemd
     install_dependencies
+    migrate_legacy_install_root
 
     case "$ACTION" in
         install)

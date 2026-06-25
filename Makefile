@@ -38,8 +38,8 @@ docker:
 install: build
 	sudo cp xboard-node /usr/local/bin/
 	sudo cp xbctl /usr/local/bin/
-	sudo mkdir -p /etc/xboard-node
-	@if [ ! -f /etc/xboard-node/config.yml ]; then \
-		sudo cp config.yml.example /etc/xboard-node/config.yml; \
-		echo "Config copied to /etc/xboard-node/config.yml - please edit it"; \
+	sudo mkdir -p /etc/XboardNode-Plus
+	@if [ ! -f /etc/XboardNode-Plus/config.yml ]; then \
+		sudo cp config.yml.example /etc/XboardNode-Plus/config.yml; \
+		echo "Config copied to /etc/XboardNode-Plus/config.yml - please edit it"; \
 	fi

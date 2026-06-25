@@ -397,7 +397,7 @@ instances:
 
 func TestConfig_AutoInstanceIDStable(t *testing.T) {
 	cfg := &Config{Panel: PanelConfig{URL: "https://Panel.Example.com/", NodeID: 1, Token: "tok"}}
-	cfg.setDefaultsFrom("/etc/xboard-node")
+	cfg.setDefaultsFrom("/etc/XboardNode-Plus")
 	id1, err := cfg.AutoInstanceID()
 	if err != nil {
 		t.Fatalf("AutoInstanceID: %v", err)

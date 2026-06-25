@@ -6,11 +6,35 @@ Node backend for [Xboard](https://github.com/cedar2025/Xboard), based on [cedar2
 
 ## Features
 
-- Protocols: V2Ray family, Trojan, Shadowsocks, Hysteria2, TUIC, AnyTLS
+- Protocols: VMess, VLESS, Trojan, Shadowsocks, Hysteria/Hysteria2, TUIC, AnyTLS, Naive, SOCKS, HTTP, Mieru
 - Sync: WebSocket push + REST polling dual channel
 - User controls: speed limit, device limit, alive-IP tracking, hot update
 - Deploy modes: node mode, machine mode, standalone mode
 - Multi-instance: single process binding multiple panels / nodes
+- Runtime sync safety fixes: see [FIXES.md](FIXES.md)
+
+## Supported Protocols
+
+The default kernel is `singbox`. Use `--kernel xray` only when a node requires Xray-specific behavior.
+
+| Kernel | Supported inbound protocols |
+| --- | --- |
+| `singbox` | `shadowsocks`, `vmess`, `vless`, `trojan`, `hysteria`, `hysteria2`, `tuic`, `anytls`, `naive`, `socks`, `http`, `mieru` |
+| `xray` | `vmess`, `vless`, `trojan`, `shadowsocks`, `hysteria` |
+
+Transport support:
+
+| Kernel | Supported transports |
+| --- | --- |
+| `singbox` | `tcp`, `ws`, `grpc`, `httpupgrade`, `h2` / `http` |
+| `xray` | `tcp`, `ws`, `grpc`, `httpupgrade`, `h2` / `http`, `xhttp` / `splithttp` |
+
+Notes:
+
+- `hysteria`, `hysteria2`, `tuic`, and `anytls` require TLS certificate configuration.
+- `trojan` requires TLS unless Reality is configured.
+- Reality is supported for `vless` and `trojan`; it requires `tls_settings.private_key` and either `tls_settings.server_name` or `tls_settings.dest`.
+- `custom_outbounds` can also use outbound-only protocols such as `wireguard`; those are not panel inbound deployment protocols.
 
 ## Install
 
@@ -42,6 +66,9 @@ curl -fsSL https://raw.githubusercontent.com/xboardnext999/XboardNode-Plus/dev/i
 curl -fsSL https://raw.githubusercontent.com/xboardnext999/XboardNode-Plus/dev/install.sh | \
   sudo bash -s -- --mode machine --panel https://panel.example.com --token TOKEN --machine-id 1
 ```
+
+The Linux installer stores configuration under `/etc/XboardNode-Plus`.
+If an older `/etc/xboard-node` directory exists, the installer migrates it automatically.
 
 ## xbctl
 

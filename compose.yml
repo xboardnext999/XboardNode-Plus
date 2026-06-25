@@ -1,7 +1,7 @@
 services:
-  xboard-node:
+  xboardnode-plus:
     image: ghcr.io/xboardnext999/xboardnode-plus:latest
-    container_name: xboard-node
+    container_name: xboardnode-plus
     restart: always
     network_mode: host
     environment:

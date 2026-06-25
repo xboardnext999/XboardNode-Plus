@@ -22,14 +22,14 @@ import (
 )
 
 const (
-	defaultConfigPath      = "/etc/xboard-node/config.yml"
-	defaultMetaPath        = "/etc/xboard-node/install-meta.json"
-	defaultCredentialsPath = "/etc/xboard-node/credentials.env"
+	defaultConfigPath      = "/etc/XboardNode-Plus/config.yml"
+	defaultMetaPath        = "/etc/XboardNode-Plus/install-meta.json"
+	defaultCredentialsPath = "/etc/XboardNode-Plus/credentials.env"
 	defaultBinaryPath      = "/usr/local/bin/xboard-node"
 	defaultCLIPath         = "/usr/local/bin/xbctl"
 	serviceName            = "xboard-node.service"
 	serviceFilePath        = "/etc/systemd/system/xboard-node.service"
-	defaultInstallRoot     = "/etc/xboard-node"
+	defaultInstallRoot     = "/etc/XboardNode-Plus"
 	downloadBase           = "https://github.com/xboardnext999/XboardNode-Plus/releases"
 )
 
@@ -225,7 +225,7 @@ shortcuts:
 }
 
 func runStatus() error {
-	fmt.Println("xboard-node status")
+	fmt.Println("XboardNode-Plus status")
 	fmt.Println()
 
 	// Version from install-meta.json
@@ -1348,7 +1348,7 @@ func runConfigInit(args []string) error {
 	inst.InstanceID = instanceID
 
 	if installRoot == "" {
-		installRoot = "/etc/xboard-node"
+		installRoot = "/etc/XboardNode-Plus"
 	}
 	inst.Kernel.ConfigDir = filepath.Join(installRoot, "instances", instanceID)
 
