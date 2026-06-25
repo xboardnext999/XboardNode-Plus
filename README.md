@@ -71,6 +71,16 @@ curl -fsSL https://raw.githubusercontent.com/xboardnext999/XboardNode-Plus/dev/i
 The Linux installer stores configuration under `/etc/XboardNode-Plus`.
 If an older `/etc/xboard-node` directory exists, the installer migrates it automatically.
 
+### Replace Original Install Command
+
+If a panel page still shows the original `cedar2025/xboard-node` install command, run this helper first:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/xboardnext999/XboardNode-Plus/dev/rewrite-install.sh | bash
+```
+
+Then paste the original install command. It will replace the installer URL with this repository and execute the converted command.
+
 ## xbctl
 
 Run `xbctl` after installation for help. Common commands:
