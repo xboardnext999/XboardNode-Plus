@@ -91,12 +91,26 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
+      - name: Set build metadata
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            echo "IMAGE_VERSION=$GITHUB_REF_NAME" >> "$GITHUB_ENV"
+          else
+            echo "IMAGE_VERSION=$GITHUB_SHA" >> "$GITHUB_ENV"
+          fi
+          echo "BUILD_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
+
       - name: Build and push
         uses: docker/build-push-action@v5
         with:
           context: .
           push: true
           platforms: linux/amd64,linux/arm64
+          build-args: |
+            VERSION=${{ env.IMAGE_VERSION }}
+            BUILD_TIME=${{ env.BUILD_TIME }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
           tags: |
             ghcr.io/xboardnext999/xboardnode-plus:latest
             ghcr.io/xboardnext999/xboardnode-plus:${{ github.sha }}

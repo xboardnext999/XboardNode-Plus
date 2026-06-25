@@ -1,5 +1,12 @@
+# syntax=docker/dockerfile:1.7
+
 # Build stage
-FROM golang:1.26-alpine AS builder
+FROM --platform=$BUILDPLATFORM golang:1.26-alpine AS builder
+
+ARG TARGETOS=linux
+ARG TARGETARCH=amd64
+ARG VERSION=dev
+ARG BUILD_TIME=unknown
 
 RUN apk add --no-cache git
 
@@ -10,9 +17,9 @@ RUN go mod download
 
 COPY . .
 
-RUN CGO_ENABLED=0 go build -ldflags "-s -w \
-    -X main.version=$(git describe --tags --always --dirty 2>/dev/null || echo dev) \
-    -X main.buildTime=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -ldflags "-s -w \
+    -X main.version=$VERSION \
+    -X main.buildTime=$BUILD_TIME" \
     -tags "with_quic with_utls with_wireguard with_clash_api" \
     -o xboard-node ./cmd/xboard-node
 
