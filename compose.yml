@@ -1,0 +1,11 @@
+services:
+  xboard-node:
+    image: ghcr.io/xboardnext999/xboardnode-plus:latest
+    container_name: xboard-node
+    restart: always
+    network_mode: host
+    environment:
+      apiHost: https://panel.example.com
+      apiKey: TOKEN
+      nodeID: "1"
+      kernel: singbox

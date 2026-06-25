@@ -1,0 +1,26 @@
+# Xboard Node Configuration
+# Top-level settings are inherited by all instances. Instance overrides take precedence.
+
+# ── Single node (simplest) ──
+# panel:
+#   url: "https://panel.example.com"
+#   token: "your-api-key"
+#   node_id: 1
+
+# ── Multiple instances ──
+# kernel:
+#   type: "singbox"
+# log:
+#   level: "info"
+# instances:
+#   - panel:
+#       url: "https://panel.example.com"
+#       token: "api-key-1"
+#       node_id: 1
+#   - panel:
+#       url: "https://panel.example.com"
+#     machine:
+#       machine_id: 2
+#       token: "machine-token-2"
+#     log:
+#       level: "debug"   # override for this instance only
