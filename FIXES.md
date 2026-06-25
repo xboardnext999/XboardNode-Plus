@@ -83,6 +83,14 @@ reload xray: success
 
 这可以避免旧 UUID 残留或新 UUID 未写入 inbound 的问题。
 
+### 6. 增加内核自适应模式
+
+`kernel.type` 支持 `auto`。新安装默认使用自适应模式：
+
+- `xhttp` / `splithttp` 自动使用 `xray`。
+- 其他支持的传输协议默认使用 `singbox`。
+- 运行日志会同时记录 `configured_kernel` 和 `effective_kernel`，方便确认配置策略和实际运行内核。
+
 ## 验证
 
 已补充并通过相关测试：

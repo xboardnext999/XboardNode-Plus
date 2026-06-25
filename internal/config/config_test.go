@@ -65,8 +65,8 @@ panel:
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if cfg.Kernel.Type != "singbox" {
-		t.Errorf("default kernel.type: got %q, want singbox", cfg.Kernel.Type)
+	if cfg.Kernel.Type != "auto" {
+		t.Errorf("default kernel.type: got %q, want auto", cfg.Kernel.Type)
 	}
 	// config_dir should default to the directory containing the config file.
 	expectedDir := filepath.Dir(path)
@@ -171,6 +171,24 @@ kernel:
 	}
 	if cfg.Kernel.Type != "xray" {
 		t.Errorf("kernel.type: got %q, want xray", cfg.Kernel.Type)
+	}
+}
+
+func TestLoad_AutoKernel(t *testing.T) {
+	path := writeTemp(t, `
+panel:
+  url: "https://example.com"
+  token: "tok"
+  node_id: 1
+kernel:
+  type: auto
+`)
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Kernel.Type != "auto" {
+		t.Errorf("kernel.type: got %q, want auto", cfg.Kernel.Type)
 	}
 }
 
@@ -326,7 +344,6 @@ kernel:
 		t.Fatal("expected error for standalone mode without users")
 	}
 }
-
 
 func TestLoadRoot_LegacyConfigNormalizesToSingleInstance(t *testing.T) {
 	path := writeTemp(t, `

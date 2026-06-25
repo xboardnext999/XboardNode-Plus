@@ -15,7 +15,7 @@ Node backend for [Xboard](https://github.com/cedar2025/Xboard), based on [cedar2
 
 ## Supported Protocols
 
-The default kernel is `singbox`. Use `--kernel xray` only when a node requires Xray-specific behavior.
+The default kernel mode is `auto`. In this mode XboardNode-Plus chooses the effective kernel from the panel node configuration: `xhttp` / `splithttp` uses `xray`, and other supported transports use `singbox` by default. You can still force a kernel with `--kernel singbox` or `--kernel xray`.
 
 | Kernel | Supported inbound protocols |
 | --- | --- |
@@ -31,6 +31,7 @@ Transport support:
 
 Notes:
 
+- `kernel.type: auto` keeps the config as an adaptive strategy. Runtime logs show both `configured_kernel` and `effective_kernel`.
 - `hysteria`, `hysteria2`, `tuic`, and `anytls` require TLS certificate configuration.
 - `trojan` requires TLS unless Reality is configured.
 - Reality is supported for `vless` and `trojan`; it requires `tls_settings.private_key` and either `tls_settings.server_name` or `tls_settings.dest`.

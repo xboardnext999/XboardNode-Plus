@@ -7,6 +7,12 @@ import (
 	"github.com/cedar2025/xboard-node/internal/config"
 )
 
+const (
+	KernelAuto    = "auto"
+	KernelSingBox = "singbox"
+	KernelXray    = "xray"
+)
+
 func ValidateNodeSpec(n *NodeSpec, kcfg config.KernelConfig) error {
 	if n == nil {
 		return nil
@@ -16,7 +22,7 @@ func ValidateNodeSpec(n *NodeSpec, kcfg config.KernelConfig) error {
 	if effectiveKernelType == "" {
 		effectiveKernelType = strings.TrimSpace(n.KernelType)
 	}
-	kernelType, err := normalizeKernelType(effectiveKernelType)
+	kernelType, err := ResolveEffectiveKernelType(n, effectiveKernelType)
 	if err != nil {
 		return fmt.Errorf("normalize kernel type: %w", err)
 	}
@@ -50,10 +56,34 @@ var singboxUnsupportedTransports = map[string]bool{
 
 func validateTransportKernel(network, kernelType string) error {
 	net := strings.ToLower(strings.TrimSpace(network))
-	if kernelType == "singbox" && singboxUnsupportedTransports[net] {
+	if kernelType == KernelSingBox && singboxUnsupportedTransports[net] {
 		return fmt.Errorf("transport %q is not supported by sing-box kernel; use xray kernel instead", net)
 	}
 	return nil
+}
+
+// ResolveEffectiveKernelType turns a configured kernel strategy into the actual
+// kernel that should handle a node spec. "auto" defaults to sing-box, except
+// for transports that require xray-core.
+func ResolveEffectiveKernelType(n *NodeSpec, configuredKernel string) (string, error) {
+	value := strings.TrimSpace(configuredKernel)
+	if value == "" && n != nil {
+		value = strings.TrimSpace(n.KernelType)
+	}
+	if value == "" {
+		value = KernelAuto
+	}
+	kernelType, err := normalizeKernelType(value)
+	if err != nil {
+		return "", err
+	}
+	if kernelType == KernelAuto {
+		if n != nil && singboxUnsupportedTransports[strings.ToLower(strings.TrimSpace(n.Network))] {
+			return KernelXray, nil
+		}
+		return KernelSingBox, nil
+	}
+	return kernelType, nil
 }
 
 // ResolveKernelForTransport returns the kernel type required by the given
@@ -62,18 +92,30 @@ func validateTransportKernel(network, kernelType string) error {
 // This is used in machine mode to auto-switch kernel per node.
 func ResolveKernelForTransport(network, configuredKernel string) string {
 	net := strings.ToLower(strings.TrimSpace(network))
-	if configuredKernel == "singbox" && singboxUnsupportedTransports[net] {
-		return "xray"
+	kernelType, err := normalizeKernelType(configuredKernel)
+	if err != nil {
+		return configuredKernel
 	}
-	return configuredKernel
+	if kernelType == KernelAuto {
+		if singboxUnsupportedTransports[net] {
+			return KernelXray
+		}
+		return KernelSingBox
+	}
+	if kernelType == KernelSingBox && singboxUnsupportedTransports[net] {
+		return KernelXray
+	}
+	return kernelType
 }
 
 func normalizeKernelType(value string) (string, error) {
 	switch strings.ToLower(strings.TrimSpace(value)) {
+	case KernelAuto:
+		return KernelAuto, nil
 	case "singbox", "sing-box":
-		return "singbox", nil
-	case "xray":
-		return "xray", nil
+		return KernelSingBox, nil
+	case KernelXray:
+		return KernelXray, nil
 	default:
 		return "", fmt.Errorf("unsupported kernel type %q", value)
 	}

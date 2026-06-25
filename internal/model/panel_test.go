@@ -81,4 +81,28 @@ func TestNodeSpecFromPanelValidated(t *testing.T) {
 			t.Fatalf("unexpected error: %v", err)
 		}
 	})
+
+	t.Run("auto kernel chooses xray for xhttp", func(t *testing.T) {
+		spec := &NodeSpec{Protocol: "vless", ServerPort: 8443, Network: "xhttp"}
+		kernelType, err := ResolveEffectiveKernelType(spec, "auto")
+		if err != nil {
+			t.Fatalf("ResolveEffectiveKernelType: %v", err)
+		}
+		if kernelType != "xray" {
+			t.Fatalf("kernel type: got %q, want xray", kernelType)
+		}
+		if err := ValidateNodeSpec(spec, config.KernelConfig{Type: "auto"}); err != nil {
+			t.Fatalf("ValidateNodeSpec auto: %v", err)
+		}
+	})
+
+	t.Run("explicit singbox still rejects xhttp", func(t *testing.T) {
+		err := ValidateNodeSpec(&NodeSpec{Protocol: "vless", ServerPort: 8443, Network: "xhttp"}, config.KernelConfig{Type: "singbox"})
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+		if !strings.Contains(err.Error(), `transport "xhttp" is not supported by sing-box kernel`) {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
 }
