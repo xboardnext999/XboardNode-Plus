@@ -133,6 +133,12 @@ func TestGetUsersAlwaysFetchesFullSnapshot(t *testing.T) {
 		if got := r.Header.Get("If-None-Match"); got != "" {
 			t.Fatalf("GetUsers sent If-None-Match %q; users must be polled uncached", got)
 		}
+		if got := r.Header.Get("Cache-Control"); got != "no-cache, no-store" {
+			t.Fatalf("Cache-Control = %q, want no-cache, no-store", got)
+		}
+		if got := r.Header.Get("Pragma"); got != "no-cache" {
+			t.Fatalf("Pragma = %q, want no-cache", got)
+		}
 		w.Header().Set("ETag", `"u-etag"`)
 		if callCount == 1 {
 			json.NewEncoder(w).Encode(UsersResponse{Users: []User{{ID: 1, UUID: "u1"}}})

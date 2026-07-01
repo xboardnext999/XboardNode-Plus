@@ -1,4 +1,4 @@
-# XboardNode-Plus 1.16 修复说明
+# XboardNode-Plus 1.17 修复说明
 
 本文记录 XboardNode-Plus 针对运行中用户同步异常的修复内容。
 
@@ -19,6 +19,8 @@ proxy/vless/encoding: invalid request user id: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxx
 - REST 同步拿到空响应、失败响应或异常用户快照后，覆盖了当前有效用户列表。
 - 配置未变化返回 304 时，用户同步流程可能没有被正确处理。
 - 面板调整节点权限组后，用户接口 ETag 没变化，节点误判用户授权列表未变化。
+- 面板或反代缓存返回旧用户授权列表，导致权限组变更后节点仍未拿到新用户。
+- 部分精简系统 root 环境没有安装 `sudo`，`xbctl service logs` 无法查看日志。
 - Xray inbound 热更新失败，但内存里的用户缓存被错误更新为“已经成功”。
 - 同一个用户 ID 的 UUID 变化时，差异计算没有同时执行删除旧 UUID 和添加新 UUID。
 
@@ -75,9 +77,19 @@ reload xray: success
 - 节点端没有把该用户加入 inbound。
 - 重启服务后因为重新全量拉取用户，用户立即恢复。
 
-现在用户列表 REST 轮询不再使用 ETag 缓存，每轮都会拉取完整授权用户快照。配置接口仍保留 ETag 优化。
+现在用户列表 REST 轮询不再使用 ETag 缓存，每轮都会拉取完整授权用户快照，并显式发送 `Cache-Control: no-cache, no-store`。配置接口仍保留 ETag 优化。
 
-### 5. 修复 Xray 用户热更新一致性
+### 5. 修复 xbctl 日志命令的 sudo 兼容性
+
+`xbctl service status`、`xbctl service restart`、`xbctl service logs` 之前会固定调用 `sudo`。在部分精简系统或容器环境里，root 用户已经有权限，但系统没有安装 `sudo`，会出现：
+
+```text
+exec: "sudo": executable file not found in $PATH
+```
+
+现在 `xbctl` 会先判断当前是否为 root：root 环境直接调用 `systemctl` / `journalctl`，非 root 环境才使用 `sudo`。
+
+### 6. 修复 Xray 用户热更新一致性
 
 如果调用 Xray `AddUser` 或 `UpdateUsers` 失败，节点不会再错误地更新本地内存用户缓存。
 
@@ -89,7 +101,7 @@ reload xray: success
 
 现场进一步确认，部分环境中 Xray `UserManager` 返回成功后，实际 inbound 用户表仍可能与完整快照不一致，表现为“同步日志成功，但只有重启服务后普通用户恢复”。因此 Xray 用户凭据发生增删或 UUID 变化时，已改为使用完整用户快照重建 Xray 实例，不再依赖 `UserManager` 增量 patch。
 
-### 6. 修复 UUID 变化差异计算
+### 7. 修复 UUID 变化差异计算
 
 如果同一个用户 ID 的 UUID 发生变化，现在会正确处理为：
 
@@ -98,7 +110,7 @@ reload xray: success
 
 这可以避免旧 UUID 残留或新 UUID 未写入 inbound 的问题。
 
-### 7. 增加内核自适应模式
+### 8. 增加内核自适应模式
 
 `kernel.type` 支持 `auto`。新安装默认使用自适应模式：
 
@@ -113,6 +125,8 @@ reload xray: success
 - 异常用户快照不会覆盖当前有效用户。
 - 配置 304 时仍允许用户同步。
 - 用户列表不会因为后端 users ETag 未变化而跳过权限组同步。
+- 用户列表请求会显式绕过 HTTP 缓存。
+- `xbctl service logs` 在无 sudo 的 root 环境可以正常使用。
 - UUID 变化时会同时产生删除和新增差异。
 - Xray 用户热更新失败不会错误更新内存状态。
 
@@ -124,7 +138,7 @@ go test ./...
 
 ## 部署建议
 
-升级到 1.16 后，如果再次出现用户无法连接，请优先查看同步日志中的：
+升级到 1.17 后，如果再次出现用户无法连接，请优先查看同步日志中的：
 
 - `previous_users`
 - `fetched_users`

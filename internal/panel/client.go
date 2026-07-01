@@ -439,6 +439,11 @@ func (c *Client) doRequest(method, path string, body []byte, ifNoneMatch string)
 	if ifNoneMatch != "" {
 		req.Header.Set("If-None-Match", ifNoneMatch)
 	}
+	if method == "GET" && path == c.userPath() {
+		req.Header.Set("Cache-Control", "no-cache, no-store")
+		req.Header.Set("Pragma", "no-cache")
+		req.Header.Set("Expires", "0")
+	}
 
 	nlog.Core().Debug("panel request", "method", method, "path", path)
 

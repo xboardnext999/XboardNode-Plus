@@ -297,17 +297,27 @@ func runService(args []string) error {
 	rest := args[1:]
 	switch sub {
 	case "status":
-		return runCommand("sudo", append([]string{"systemctl", "status", serviceName, "--no-pager"}, rest...)...)
+		return runPrivilegedCommand("systemctl", append([]string{"status", serviceName, "--no-pager"}, rest...)...)
 	case "start", "stop", "restart", "enable", "disable":
-		return runCommand("sudo", append([]string{"systemctl", sub, serviceName}, rest...)...)
+		return runPrivilegedCommand("systemctl", append([]string{sub, serviceName}, rest...)...)
 	case "logs":
 		if len(rest) == 0 {
 			rest = []string{"-f"}
 		}
-		return runCommand("sudo", append([]string{"journalctl", "-u", serviceName}, rest...)...)
+		return runPrivilegedCommand("journalctl", append([]string{"-u", serviceName}, rest...)...)
 	default:
 		return fmt.Errorf("unknown service command: %s", sub)
 	}
+}
+
+func runPrivilegedCommand(name string, args ...string) error {
+	if os.Geteuid() == 0 {
+		return runCommand(name, args...)
+	}
+	if _, err := exec.LookPath("sudo"); err != nil {
+		return fmt.Errorf("%s requires root privileges and sudo is not installed; run as root or install sudo", name)
+	}
+	return runCommand("sudo", append([]string{name}, args...)...)
 }
 
 func runHealth() error {
