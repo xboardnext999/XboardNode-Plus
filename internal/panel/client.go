@@ -37,7 +37,6 @@ type Client struct {
 	httpClient *http.Client
 
 	configETag string
-	userETag   string
 
 	apiSuccess atomic.Uint64
 	apiFailure atomic.Uint64
@@ -253,16 +252,21 @@ func (c *Client) GetConfig() (*NodeConfig, error) {
 	return &cfg, nil
 }
 
-// GetUsers fetches available users. Returns nil if not modified (304).
+// GetUsers fetches the full list of users currently authorized for this node.
+//
+// User membership can change when an operator edits node permission groups.
+// Some panels do not update the users ETag for that authorization-only change,
+// which makes a cached 304 response stale until the node service restarts. User
+// polling is therefore intentionally uncached; config polling still uses ETags.
 func (c *Client) GetUsers() ([]User, error) {
-	resp, err := c.doRequest("GET", c.userPath(), nil, c.userETag)
+	resp, err := c.doRequest("GET", c.userPath(), nil, "")
 	if err != nil {
 		return nil, fmt.Errorf("get users: %w", err)
 	}
 	defer drainAndClose(resp.Body)
 
 	if resp.StatusCode == http.StatusNotModified {
-		return nil, nil
+		return nil, fmt.Errorf("unexpected 304 from uncached users request")
 	}
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
@@ -272,10 +276,6 @@ func (c *Client) GetUsers() ([]User, error) {
 	var usersResp UsersResponse
 	if err := json.NewDecoder(resp.Body).Decode(&usersResp); err != nil {
 		return nil, fmt.Errorf("decode: %w", err)
-	}
-
-	if etag := resp.Header.Get("ETag"); etag != "" {
-		c.userETag = etag
 	}
 	return usersResp.Users, nil
 }
@@ -315,10 +315,11 @@ func (c *Client) PushStatus(cpu float64, mem, swap, disk [2]uint64) error {
 	return c.postJSON("/api/v1/server/UniProxy/status", payload)
 }
 
-// ResetETags clears cached ETags, forcing full responses
+// ResetETags clears cached ETags, forcing full config responses. User polling
+// is intentionally uncached because node permission-group edits may not update
+// the panel's users ETag.
 func (c *Client) ResetETags() {
 	c.configETag = ""
-	c.userETag = ""
 }
 
 // GetMachineNodes fetches the list of active nodes bound to this machine.

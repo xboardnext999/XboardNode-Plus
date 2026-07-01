@@ -126,16 +126,19 @@ func TestGetUsers_Success(t *testing.T) {
 	}
 }
 
-func TestGetUsers_NotModified(t *testing.T) {
+func TestGetUsersAlwaysFetchesFullSnapshot(t *testing.T) {
 	callCount := 0
 	ts, client := newTestServer(func(w http.ResponseWriter, r *http.Request) {
 		callCount++
+		if got := r.Header.Get("If-None-Match"); got != "" {
+			t.Fatalf("GetUsers sent If-None-Match %q; users must be polled uncached", got)
+		}
+		w.Header().Set("ETag", `"u-etag"`)
 		if callCount == 1 {
-			w.Header().Set("ETag", `"u-etag"`)
 			json.NewEncoder(w).Encode(UsersResponse{Users: []User{{ID: 1, UUID: "u1"}}})
 			return
 		}
-		w.WriteHeader(http.StatusNotModified)
+		json.NewEncoder(w).Encode(UsersResponse{Users: []User{{ID: 1, UUID: "u1"}, {ID: 2, UUID: "u2"}}})
 	})
 	defer ts.Close()
 
@@ -147,8 +150,8 @@ func TestGetUsers_NotModified(t *testing.T) {
 	if err != nil {
 		t.Fatalf("second GetUsers: %v", err)
 	}
-	if users != nil {
-		t.Error("expected nil for 304")
+	if len(users) != 2 {
+		t.Fatalf("second call: got %d users, want 2", len(users))
 	}
 }
 
