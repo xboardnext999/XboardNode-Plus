@@ -74,6 +74,8 @@ reload xray: success
 - 服务层可触发 fallback 或 reload。
 - 避免出现“内存认为用户存在，但 Xray 实际没有该用户”的状态。
 
+现场进一步确认，部分环境中 Xray `UserManager` 返回成功后，实际 inbound 用户表仍可能与完整快照不一致，表现为“同步日志成功，但只有重启服务后普通用户恢复”。因此 Xray 用户凭据发生增删或 UUID 变化时，已改为使用完整用户快照重建 Xray 实例，不再依赖 `UserManager` 增量 patch。
+
 ### 5. 修复 UUID 变化差异计算
 
 如果同一个用户 ID 的 UUID 发生变化，现在会正确处理为：

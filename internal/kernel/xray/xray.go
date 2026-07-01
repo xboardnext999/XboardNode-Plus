@@ -277,14 +277,12 @@ func (x *Xray) ClearGlobalDevices() {}
 
 // ─── User management (non-disruptive where possible) ────────────────────────
 
-// AddUsers adds new users to the running kernel via xray's UserManager API.
-// For protocols that support UserManager (vmess, vless, trojan, shadowsocks),
-// this is truly hitless — no restart, no connection disruption.
-// For unsupported protocols (socks, http), falls back to full restart.
+// AddUsers merges new users into the running Xray instance.
 //
-// Delta "add" events also carry property updates (speed/device limits) for
-// existing users, so this method always merges properties and refreshes the
-// dispatcher limits — even when no brand-new users need to be added.
+// Xray's UserManager can report success while the effective inbound user table
+// is still stale for some transports/panel combinations. A full Xray restart is
+// therefore used whenever credentials change, matching the known-good initial
+// snapshot path and avoiding "restart fixes it" user drift.
 func (x *Xray) AddUsers(users []model.UserSpec) (int, error) {
 	x.mu.Lock()
 	if x.instance == nil {
@@ -303,6 +301,7 @@ func (x *Xray) AddUsers(users []model.UserSpec) (int, error) {
 			userMap[u.ID] = u // property update for an existing kernel user
 		} else {
 			toAdd = append(toAdd, u)
+			userMap[u.ID] = u
 		}
 	}
 
@@ -316,59 +315,20 @@ func (x *Xray) AddUsers(users []model.UserSpec) (int, error) {
 		return 0, nil
 	}
 
-	um, err := x.getUserManager()
-	if err != nil {
-		// Protocol doesn't support UserManager → full restart
-		nc, t := x.nodeConfig, x.tls
-		targetUsers := append(usersFromMap(userMap), toAdd...)
-		x.mu.Unlock()
-		nlog.Core().Debug("xray: AddUsers fallback to restart", "reason", err)
-		if err := x.Start(nc, targetUsers, t); err != nil {
-			return 0, err
-		}
-		return len(toAdd), nil
-	}
-
-	proto := x.protocol
 	nc := x.nodeConfig
+	t := x.tls
+	targetUsers := usersFromMap(userMap)
 	x.mu.Unlock()
 
-	ctx := context.Background()
-	added := 0
-	var addErrs []error
-	for _, u := range toAdd {
-		mu, err := toMemoryUser(proto, nc, u)
-		if err != nil {
-			nlog.Core().Warn("xray: skip user, cannot build account", "user", u.ID, "error", err)
-			addErrs = append(addErrs, err)
-			continue
-		}
-		if err := um.AddUser(ctx, mu); err != nil {
-			nlog.Core().Warn("xray: AddUser failed", "user", u.ID, "error", err)
-			addErrs = append(addErrs, err)
-			continue
-		}
-		userMap[u.ID] = u
-		added++
+	if err := x.Start(nc, targetUsers, t); err != nil {
+		return 0, err
 	}
-
-	// Update bookkeeping only with users that were actually applied to xray.
-	merged := usersFromMap(userMap)
-	x.mu.Lock()
-	x.users = merged
-	x.mu.Unlock()
-	x.updateDispatcherLimits(merged)
-	x.updateBandwidthLimits(merged)
-
-	if len(addErrs) > 0 {
-		return added, fmt.Errorf("xray: %d/%d users failed to add", len(addErrs), len(toAdd))
-	}
-	nlog.Core().Info("xray: users added via UserManager", "added", added, "total", len(merged))
-	return added, nil
+	nlog.Core().Info("xray: users added via full restart", "added", len(toAdd), "total", len(targetUsers))
+	return len(toAdd), nil
 }
 
-// RemoveUsers removes users from the running kernel via xray's UserManager API.
-// Truly hitless for supported protocols — remaining connections unaffected.
+// RemoveUsers removes users from the running Xray instance. See AddUsers for
+// why credential changes use a full restart instead of UserManager patching.
 func (x *Xray) RemoveUsers(users []model.UserSpec) (int, error) {
 	x.mu.Lock()
 	if x.instance == nil {
@@ -399,42 +359,19 @@ func (x *Xray) RemoveUsers(users []model.UserSpec) (int, error) {
 		return removed, nil
 	}
 
-	um, err := x.getUserManager()
-	if err != nil {
-		nc, t := x.nodeConfig, x.tls
-		x.mu.Unlock()
-		nlog.Core().Debug("xray: RemoveUsers fallback to restart", "reason", err)
-		if err := x.Start(nc, kept, t); err != nil {
-			return 0, err
-		}
-		return removed, nil
-	}
+	nc, t := x.nodeConfig, x.tls
 	x.mu.Unlock()
 
-	ctx := context.Background()
-	actualRemoved := 0
-	for _, u := range users {
-		email := userEmail(u.ID)
-		if err := um.RemoveUser(ctx, email); err != nil {
-			nlog.Core().Debug("xray: RemoveUser skipped", "user", u.ID, "error", err)
-			continue
-		}
-		actualRemoved++
+	if err := x.Start(nc, kept, t); err != nil {
+		return 0, err
 	}
-
-	x.mu.Lock()
-	x.users = kept
-	x.mu.Unlock()
-	x.updateDispatcherLimits(kept)
-	x.updateBandwidthLimits(kept)
-
-	nlog.Core().Info("xray: users removed via UserManager", "removed", actualRemoved, "total", len(kept))
-	return actualRemoved, nil
+	nlog.Core().Info("xray: users removed via full restart", "removed", removed, "total", len(kept))
+	return removed, nil
 }
 
 // UpdateUsers replaces the entire user set. If only speed/device limits
-// changed, updates the dispatcher without restarting. Otherwise uses
-// UserManager for hitless add/remove where supported.
+// changed, updates the dispatcher without restarting. Credential changes use a
+// full restart to guarantee the actual inbound user table matches the snapshot.
 func (x *Xray) UpdateUsers(users []model.UserSpec) (added, removed int, err error) {
 	x.mu.Lock()
 	if x.instance == nil {
@@ -454,80 +391,14 @@ func (x *Xray) UpdateUsers(users []model.UserSpec) (added, removed int, err erro
 		return 0, 0, nil
 	}
 
-	um, umErr := x.getUserManager()
-	if umErr != nil {
-		// Protocol doesn't support UserManager → full restart
-		nc, t := x.nodeConfig, x.tls
-		x.mu.Unlock()
-		nlog.Core().Debug("xray: UpdateUsers fallback to restart", "reason", umErr)
-		if err = x.Start(nc, users, t); err != nil {
-			return 0, 0, err
-		}
-		return
-	}
-
-	proto := x.protocol
 	nc := x.nodeConfig
+	t := x.tls
 	x.mu.Unlock()
 
-	ctx := context.Background()
-	memoryUsers := make(map[int]*protocol.MemoryUser, len(toAdd))
-	for _, u := range toAdd {
-		mu, err := toMemoryUser(proto, nc, u)
-		if err != nil {
-			return 0, 0, fmt.Errorf("xray: build user %d in UpdateUsers: %w", u.ID, err)
-		}
-		memoryUsers[u.ID] = mu
+	if err = x.Start(nc, users, t); err != nil {
+		return 0, 0, err
 	}
-
-	// Remove first, then add (order matters for UUID changes on same ID)
-	for _, u := range toRemove {
-		email := userEmail(u.ID)
-		if err := um.RemoveUser(ctx, email); err != nil {
-			nlog.Core().Debug("xray: RemoveUser skipped in UpdateUsers", "user", u.ID, "error", err)
-		}
-	}
-	applied := make(map[int]model.UserSpec, len(users))
-	removeSet := make(map[int]struct{}, len(toRemove))
-	for _, u := range toRemove {
-		removeSet[u.ID] = struct{}{}
-	}
-	for _, u := range x.users {
-		if _, removed := removeSet[u.ID]; !removed {
-			applied[u.ID] = u
-		}
-	}
-	for _, u := range users {
-		if _, adding := memoryUsers[u.ID]; !adding {
-			applied[u.ID] = u
-		}
-	}
-
-	var addErrs []error
-	for _, u := range toAdd {
-		mu := memoryUsers[u.ID]
-		if err := um.AddUser(ctx, mu); err != nil {
-			nlog.Core().Warn("xray: AddUser failed in UpdateUsers", "user", u.ID, "error", err)
-			addErrs = append(addErrs, err)
-			continue
-		}
-		applied[u.ID] = u
-	}
-
-	appliedUsers := users
-	if len(addErrs) > 0 {
-		appliedUsers = usersFromMap(applied)
-	}
-	x.mu.Lock()
-	x.users = appliedUsers
-	x.mu.Unlock()
-	x.updateDispatcherLimits(appliedUsers)
-	x.updateBandwidthLimits(appliedUsers)
-
-	if len(addErrs) > 0 {
-		return added, removed, fmt.Errorf("xray: %d/%d users failed to add in UpdateUsers", len(addErrs), len(toAdd))
-	}
-	nlog.Core().Info("xray: users updated via UserManager", "added", added, "removed", removed, "total", len(users))
+	nlog.Core().Info("xray: users updated via full restart", "added", added, "removed", removed, "total", len(users))
 	return
 }
 
