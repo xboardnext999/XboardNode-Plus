@@ -1,4 +1,4 @@
-# XboardNode-Plus 1.14 修复说明
+# XboardNode-Plus 1.15 修复说明
 
 本文记录 XboardNode-Plus 针对运行中用户同步异常的修复内容。
 
@@ -110,7 +110,7 @@ go test ./...
 
 ## 部署建议
 
-升级到 1.14 后，如果再次出现用户无法连接，请优先查看同步日志中的：
+升级到 1.15 后，如果再次出现用户无法连接，请优先查看同步日志中的：
 
 - `previous_users`
 - `fetched_users`
