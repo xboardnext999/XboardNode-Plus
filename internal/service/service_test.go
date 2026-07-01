@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/cedar2025/xboard-node/internal/cert"
 	"github.com/cedar2025/xboard-node/internal/config"
@@ -15,6 +16,7 @@ import (
 )
 
 type fakeKernel struct {
+	name    string
 	running bool
 
 	startErr  error
@@ -34,7 +36,12 @@ type fakeKernel struct {
 	deviceLimitFunc func(string) (int, bool)
 }
 
-func (f *fakeKernel) Name() string                      { return "fake" }
+func (f *fakeKernel) Name() string {
+	if f.name != "" {
+		return f.name
+	}
+	return "fake"
+}
 func (f *fakeKernel) Protocols() []string               { return []string{"vless"} }
 func (f *fakeKernel) Capabilities() kernel.Capabilities { return kernel.Capabilities{} }
 func (f *fakeKernel) Start(nodeConfig *model.NodeSpec, users []model.UserSpec, tls kernel.TLSCert) error {
@@ -250,6 +257,46 @@ func TestApplyUserUpdateRejectsAbnormalUserDrop(t *testing.T) {
 	}
 	if len(s.lastUsers) != len(oldUsers) {
 		t.Fatalf("lastUsers count = %d, want %d", len(s.lastUsers), len(oldUsers))
+	}
+}
+
+func TestReconcileUnchangedUsersRestartsXrayAfterInterval(t *testing.T) {
+	k := &fakeKernel{name: "xray", running: true}
+	s := newTestService(k)
+	s.lastConfig = &model.NodeSpec{Protocol: "vless"}
+	users := []model.UserSpec{{ID: 1, UUID: "uuid-old", SpeedLimit: 4}}
+	s.updateUserState(users)
+	s.lastReconcile = time.Now().Add(-xrayUserReconcileInterval)
+
+	diag, ok := s.beginUserSync("rest", users)
+	if !ok {
+		t.Fatal("beginUserSync rejected unchanged users")
+	}
+	if reconciled := s.reconcileUnchangedUsers(context.Background(), users, computeUserHash(users), diag); !reconciled {
+		t.Fatal("expected unchanged xray users to be reconciled after interval")
+	}
+	if got := k.startCalls; got != 1 {
+		t.Fatalf("Start call count = %d, want 1", got)
+	}
+}
+
+func TestReconcileUnchangedUsersSkipsBeforeInterval(t *testing.T) {
+	k := &fakeKernel{name: "xray", running: true}
+	s := newTestService(k)
+	s.lastConfig = &model.NodeSpec{Protocol: "vless"}
+	users := []model.UserSpec{{ID: 1, UUID: "uuid-old", SpeedLimit: 4}}
+	s.updateUserState(users)
+	s.lastReconcile = time.Now()
+
+	diag, ok := s.beginUserSync("rest", users)
+	if !ok {
+		t.Fatal("beginUserSync rejected unchanged users")
+	}
+	if reconciled := s.reconcileUnchangedUsers(context.Background(), users, computeUserHash(users), diag); reconciled {
+		t.Fatal("expected unchanged xray users to skip reconciliation before interval")
+	}
+	if got := k.startCalls; got != 0 {
+		t.Fatalf("Start call count = %d, want 0", got)
 	}
 }
 

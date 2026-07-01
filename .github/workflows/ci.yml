@@ -9,7 +9,7 @@ on:
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-  RELEASE_VERSION: "1.17"
+  RELEASE_VERSION: "1.18"
 
 jobs:
   test:

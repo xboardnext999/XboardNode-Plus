@@ -1,4 +1,4 @@
-# XboardNode-Plus 1.17 修复说明
+# XboardNode-Plus 1.18 修复说明
 
 本文记录 XboardNode-Plus 针对运行中用户同步异常的修复内容。
 
@@ -110,7 +110,26 @@ exec: "sudo": executable file not found in $PATH
 
 这可以避免旧 UUID 残留或新 UUID 未写入 inbound 的问题。
 
-### 8. 增加内核自适应模式
+### 8. 增加 Xray 用户表自愈重建
+
+现场确认面板已经返回用户可用，且节点 REST 同步也持续成功，但 Xray 仍可能出现实际 inbound 用户表与节点内存用户快照不一致。典型表现是：
+
+- 面板诊断显示用户 `reason=ok`，属于节点权限组且未过期、未超流量、未封禁。
+- 节点日志持续显示 `fetched_users` 不变、`added=0 removed=0`、`inbound_user_update=unchanged`。
+- 用户连接仍报 `invalid request user id`。
+- 重启服务后立即恢复。
+
+现在 Xray 内核会对未变化的完整用户快照进行周期性自愈重建。即使用户数量和哈希没有变化，也会按间隔用当前完整快照重建 Xray 用户表，修复“节点内存认为用户存在，但 Xray 实际 inbound 丢失该用户”的漂移状态。
+
+触发后同步日志会出现：
+
+```text
+inbound_user_update=reconciled reload_xray=success
+```
+
+该逻辑只针对 `xray` 生效，并带有间隔限制，避免每分钟 REST 轮询都重启内核。
+
+### 9. 增加内核自适应模式
 
 `kernel.type` 支持 `auto`。新安装默认使用自适应模式：
 
@@ -129,6 +148,7 @@ exec: "sudo": executable file not found in $PATH
 - `xbctl service logs` 在无 sudo 的 root 环境可以正常使用。
 - UUID 变化时会同时产生删除和新增差异。
 - Xray 用户热更新失败不会错误更新内存状态。
+- Xray 用户快照未变化时会按间隔执行完整用户表自愈重建。
 
 本地验证命令：
 
@@ -138,7 +158,7 @@ go test ./...
 
 ## 部署建议
 
-升级到 1.17 后，如果再次出现用户无法连接，请优先查看同步日志中的：
+升级到 1.18 后，如果再次出现用户无法连接，请优先查看同步日志中的：
 
 - `previous_users`
 - `fetched_users`
@@ -147,5 +167,6 @@ go test ./...
 - `inbound_user_update`
 - `reload_kernel`
 - `reload_xray`
+- `inbound_user_update=reconciled`
 
 这些字段可以快速判断是面板返回异常、同步快照异常，还是 Xray inbound 热更新失败。

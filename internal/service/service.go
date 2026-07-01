@@ -58,6 +58,7 @@ type Service struct {
 
 	lastUserHash   string     // hash of user list for change detection
 	lastConfigHash string     // hash of full config for change detection
+	lastReconcile  time.Time  // last full user-table reconciliation for drift-prone kernels
 	pullBackoff    apiBackoff // backoff for panel pull failures
 	pushBackoff    apiBackoff // backoff for panel push failures
 
@@ -95,6 +96,7 @@ const (
 	abnormalUserDropMinPrevious    = 10
 	abnormalUserDropRatioNumerator = 1
 	abnormalUserDropRatioDenom     = 2
+	xrayUserReconcileInterval      = 5 * time.Minute
 )
 
 type syncDiagnostics struct {
@@ -841,8 +843,12 @@ func (s *Service) applyPullResult(ctx context.Context, result pullResult) {
 		} else if usersChanged {
 			s.updateUserState(result.users)
 		} else if restDiag != nil && !configChanged {
-			s.finishUserSync(*restDiag, "unchanged", "skipped")
-			restDiag = nil
+			if s.reconcileUnchangedUsers(ctx, result.users, result.userHash, *restDiag) {
+				restDiag = nil
+			} else {
+				s.finishUserSync(*restDiag, "unchanged", "skipped")
+				restDiag = nil
+			}
 		}
 	}
 
@@ -957,6 +963,44 @@ func (s *Service) finishUserSync(diag syncDiagnostics, inboundStatus, reloadStat
 	)
 }
 
+func (s *Service) reconcileUnchangedUsers(ctx context.Context, users []model.UserSpec, newHash string, diag syncDiagnostics) bool {
+	_ = ctx
+	if s.kernel == nil || s.kernel.Name() != "xray" {
+		return false
+	}
+	if s.lastConfig == nil || len(users) == 0 {
+		return false
+	}
+	if !s.lastReconcile.IsZero() && time.Since(s.lastReconcile) < xrayUserReconcileInterval {
+		return false
+	}
+	if !s.kernel.IsRunning() {
+		if s.ensureRunning() {
+			s.lastReconcile = time.Now()
+			s.finishUserSync(diag, "reconciled", "start_success")
+			return true
+		}
+		s.finishUserSync(diag, "reconcile_skipped_not_running", "skipped")
+		return true
+	}
+
+	prevUsers, prevHash := s.prepareUserState(users)
+	reloadStatus := "failed"
+	if s.startKernel(s.lastConfig, users) {
+		reloadStatus = "success"
+		if newHash != "" {
+			s.lastUserHash = newHash
+		}
+		s.lastReconcile = time.Now()
+		s.finishUserSync(diag, "reconciled", reloadStatus)
+		return true
+	}
+
+	s.restoreUserState(prevUsers, prevHash)
+	s.finishUserSync(diag, "reconcile_failed", reloadStatus)
+	return true
+}
+
 func (s *Service) syncLogger() *nlog.NodeLog {
 	if s.nodeLog != nil {
 		return s.nodeLog
@@ -1012,6 +1056,7 @@ func (s *Service) startKernel(nc *model.NodeSpec, users []model.UserSpec) bool {
 
 	s.appliedState.Config = nc
 	s.appliedState.Users = users
+	s.lastReconcile = time.Now()
 
 	// Initialize node logger on first successful start
 	if s.nodeLog == nil {
