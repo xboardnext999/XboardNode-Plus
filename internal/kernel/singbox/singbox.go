@@ -18,6 +18,7 @@ import (
 	"github.com/sagernet/sing/service"
 	"golang.org/x/time/rate"
 
+	"github.com/cedar2025/xboard-node/internal/accesslog"
 	"github.com/cedar2025/xboard-node/internal/config"
 	"github.com/cedar2025/xboard-node/internal/kernel"
 	"github.com/cedar2025/xboard-node/internal/model"
@@ -621,6 +622,14 @@ func (s *SingBox) GetUserTraffic(_ context.Context) (traffic map[int][2]int64, a
 	}
 	traffic, aliveIPs, connCount = ct.GetUserTraffic()
 	return traffic, aliveIPs, connCount, nil
+}
+
+func (s *SingBox) FlushRecentAccess() []accesslog.Event {
+	ct := s.connTrackerSafe()
+	if ct == nil {
+		return nil
+	}
+	return ct.FlushRecentAccess()
 }
 
 // CloseConnection force-closes a specific connection by its ID.

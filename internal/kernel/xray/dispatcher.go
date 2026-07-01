@@ -7,6 +7,7 @@ import (
 	"sort"
 	"sync"
 	"sync/atomic"
+	"time"
 	_ "unsafe"
 
 	xrayDispatcher "github.com/xtls/xray-core/app/dispatcher"
@@ -17,8 +18,11 @@ import (
 	"github.com/xtls/xray-core/features/routing"
 	"github.com/xtls/xray-core/transport"
 
+	"github.com/cedar2025/xboard-node/internal/accesslog"
 	"github.com/cedar2025/xboard-node/internal/nlog"
 )
+
+const maxAccessEvents = 100
 
 // Access xray's internal config creator registry so we can replace the
 // default dispatcher factory with ours. This runs AFTER xray's init()
@@ -76,6 +80,9 @@ type LimitDispatcher struct {
 	deviceLimits map[string]int            // email → max devices
 	emailToUID   map[string]int            // email → panel user ID
 
+	accessMu sync.Mutex
+	access   []accesslog.Event
+
 	// unlimitedIPs: users without device limit — sync.Map for lock-free access.
 	// Each entry is *ipCounter{ips sync.Map}.
 	unlimitedIPs sync.Map // email → *ipCounter
@@ -117,6 +124,7 @@ func (d *LimitDispatcher) Dispatch(ctx context.Context, dest net.Destination) (*
 	}
 
 	if email != "" {
+		d.recordAccess(email, sourceIP, dest)
 		d.trackLink(link, email, sourceIP, isTCP)
 	}
 	return link, nil
@@ -129,6 +137,7 @@ func (d *LimitDispatcher) DispatchLink(ctx context.Context, dest net.Destination
 	}
 
 	if email != "" {
+		d.recordAccess(email, sourceIP, dest)
 		d.trackLink(link, email, sourceIP, isTCP)
 	}
 	return d.innerDisp.DispatchLink(ctx, dest, link)
@@ -212,6 +221,46 @@ func (d *LimitDispatcher) ResetConns() {
 	})
 
 	d.connCount.Store(0)
+}
+
+func (d *LimitDispatcher) FlushRecentAccess() []accesslog.Event {
+	d.accessMu.Lock()
+	events := d.access
+	d.access = nil
+	d.accessMu.Unlock()
+
+	if len(events) == 0 {
+		return nil
+	}
+	cp := make([]accesslog.Event, len(events))
+	copy(cp, events)
+	return cp
+}
+
+func (d *LimitDispatcher) recordAccess(email, sourceIP string, dest net.Destination) {
+	d.mu.RLock()
+	uid := d.emailToUID[email]
+	d.mu.RUnlock()
+	if uid <= 0 {
+		return
+	}
+
+	event := accesslog.Event{
+		UserID:      uid,
+		XrayEmail:   email,
+		Source:      sourceIP,
+		Network:     dest.Network.SystemString(),
+		Destination: dest.String(),
+		Timestamp:   time.Now().Unix(),
+	}
+
+	d.accessMu.Lock()
+	if len(d.access) >= maxAccessEvents {
+		copy(d.access, d.access[len(d.access)-maxAccessEvents+1:])
+		d.access = d.access[:maxAccessEvents-1]
+	}
+	d.access = append(d.access, event)
+	d.accessMu.Unlock()
 }
 
 // GetConnectionState returns dispatcher-tracked alive IPs and connection count.

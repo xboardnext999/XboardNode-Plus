@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"sort"
 
+	"github.com/cedar2025/xboard-node/internal/accesslog"
 	"github.com/cedar2025/xboard-node/internal/model"
 	"golang.org/x/time/rate"
 )
@@ -86,6 +87,9 @@ type Kernel interface {
 	// traffic maps userID → [upload, download] cumulative bytes.
 	// connCount is the total number of active connections (for metrics).
 	GetUserTraffic(ctx context.Context) (traffic map[int][2]int64, aliveIPs map[int]map[string]bool, connCount int, err error)
+	// FlushRecentAccess returns and clears recent per-connection destinations.
+	// This is a short-lived diagnostic feed, not a durable access log.
+	FlushRecentAccess() []accesslog.Event
 	// CloseConnection terminates a specific connection by ID.
 	CloseConnection(ctx context.Context, connID string) error
 	// CloseUserConnections terminates all connections for the given user UUID.

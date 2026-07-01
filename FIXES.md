@@ -1,4 +1,4 @@
-# XboardNode-Plus 1.18 修复说明
+# XboardNode-Plus 1.19 修复说明
 
 本文记录 XboardNode-Plus 针对运行中用户同步异常的修复内容。
 
@@ -137,6 +137,23 @@ inbound_user_update=reconciled reload_xray=success
 - 其他支持的传输协议默认使用 `singbox`。
 - 运行日志会同时记录 `configured_kernel` 和 `effective_kernel`，方便确认配置策略和实际运行内核。
 
+### 10. 增加最近访问目标上报
+
+节点端会在用户连接通过内核调度时记录最近访问目标，并在下一次 report 上报给面板。
+
+上报字段包含：
+
+- 用户 ID
+- Xray 日志标识，例如 `user@1`
+- 来源 IP
+- 网络类型
+- 访问目标，例如 `tcp:www.google.com:443`
+- 访问时间
+
+该功能用于配合面板的“节点同步诊断”插件看板，把节点日志中的 `user@用户ID` 对应到后台真实邮箱，并查看用户最近访问的目标域名/IP。
+
+说明：HTTPS 连接只能看到域名或 IP 与端口，不能看到完整 URL 路径。
+
 ## 验证
 
 已补充并通过相关测试：
@@ -149,6 +166,7 @@ inbound_user_update=reconciled reload_xray=success
 - UUID 变化时会同时产生删除和新增差异。
 - Xray 用户热更新失败不会错误更新内存状态。
 - Xray 用户快照未变化时会按间隔执行完整用户表自愈重建。
+- 节点可上报最近访问目标，面板诊断插件可据此显示真实邮箱、来源 IP 和访问目标。
 
 本地验证命令：
 
@@ -158,7 +176,7 @@ go test ./...
 
 ## 部署建议
 
-升级到 1.18 后，如果再次出现用户无法连接，请优先查看同步日志中的：
+升级到 1.19 后，如果再次出现用户无法连接，请优先查看同步日志中的：
 
 - `previous_users`
 - `fetched_users`

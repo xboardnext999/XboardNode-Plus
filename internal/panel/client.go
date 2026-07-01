@@ -14,6 +14,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/cedar2025/xboard-node/internal/accesslog"
 	"github.com/cedar2025/xboard-node/internal/config"
 	"github.com/cedar2025/xboard-node/internal/nlog"
 	"github.com/go-viper/mapstructure/v2"
@@ -105,7 +106,7 @@ func (c *Client) Handshake() (*HandshakeResponse, error) {
 // The optional metrics map allows the node to submit richer telemetry
 // (active connections, per-core CPU, GC stats, limiter hits, etc.)
 // without changing the core schema of status.
-func (c *Client) Report(traffic map[int][2]int64, alive map[int][]string, online map[int]int,
+func (c *Client) Report(traffic map[int][2]int64, alive map[int][]string, online map[int]int, access []accesslog.Event,
 	cpu float64, mem, swap, disk [2]uint64,
 	metrics map[string]interface{},
 ) error {
@@ -151,6 +152,10 @@ func (c *Client) Report(traffic map[int][2]int64, alive map[int][]string, online
 			}
 			onlineMapPool.Put(o)
 		}()
+	}
+
+	if len(access) > 0 {
+		payload["access"] = access
 	}
 
 	status := map[string]interface{}{

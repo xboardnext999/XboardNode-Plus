@@ -3,6 +3,7 @@ package controlplane
 import (
 	"context"
 
+	"github.com/cedar2025/xboard-node/internal/accesslog"
 	"github.com/cedar2025/xboard-node/internal/model"
 )
 
@@ -52,6 +53,7 @@ type ReportPayload struct {
 	Traffic map[int][2]int64
 	Alive   map[int][]string
 	Online  map[int]int
+	Access  []accesslog.Event
 	CPU     float64
 	Mem     [2]uint64
 	Swap    [2]uint64

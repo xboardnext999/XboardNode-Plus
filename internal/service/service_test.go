@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/cedar2025/xboard-node/internal/accesslog"
 	"github.com/cedar2025/xboard-node/internal/cert"
 	"github.com/cedar2025/xboard-node/internal/config"
 	"github.com/cedar2025/xboard-node/internal/kernel"
@@ -90,6 +91,7 @@ func (f *fakeKernel) GetUserTraffic(ctx context.Context) (map[int][2]int64, map[
 	_ = ctx
 	return nil, nil, 0, nil
 }
+func (f *fakeKernel) FlushRecentAccess() []accesslog.Event { return nil }
 func (f *fakeKernel) CloseConnection(ctx context.Context, connID string) error {
 	_, _ = ctx, connID
 	return nil

@@ -29,6 +29,7 @@ import (
 
 	_ "github.com/xtls/xray-core/main/distro/all"
 
+	"github.com/cedar2025/xboard-node/internal/accesslog"
 	"github.com/cedar2025/xboard-node/internal/config"
 	"github.com/cedar2025/xboard-node/internal/kernel"
 	"github.com/cedar2025/xboard-node/internal/kernel/geodata"
@@ -242,6 +243,16 @@ func (x *Xray) GetUserTraffic(_ context.Context) (traffic map[int][2]int64, aliv
 		aliveIPs, connCount = ld.GetConnectionState()
 	}
 	return traffic, aliveIPs, connCount, nil
+}
+
+func (x *Xray) FlushRecentAccess() []accesslog.Event {
+	x.mu.Lock()
+	ld := x.limitDispatcher
+	x.mu.Unlock()
+	if ld == nil {
+		return nil
+	}
+	return ld.FlushRecentAccess()
 }
 
 func (x *Xray) CloseConnection(_ context.Context, _ string) error {

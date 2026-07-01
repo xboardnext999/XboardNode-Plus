@@ -5,6 +5,7 @@ import (
 	"io"
 	"net"
 	"sort"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -15,8 +16,11 @@ import (
 	N "github.com/sagernet/sing/common/network"
 	"golang.org/x/time/rate"
 
+	"github.com/cedar2025/xboard-node/internal/accesslog"
 	"github.com/cedar2025/xboard-node/internal/nlog"
 )
+
+const maxAccessEvents = 100
 
 // ipPool caches ipSnapshot maps to reduce allocations.
 var ipPool = sync.Pool{
@@ -139,6 +143,9 @@ type ConnTracker struct {
 	globalDevices    map[int]map[string]bool // userID → IP → exists
 	globalMu         sync.RWMutex
 	globalLastUpdate time.Time
+
+	accessMu sync.Mutex
+	access   []accesslog.Event
 }
 
 // NewConnTracker creates a tracker.
@@ -211,6 +218,8 @@ func (t *ConnTracker) RoutedConnection(
 ) net.Conn {
 	uuid := metadata.User
 	sourceIP := metadata.Source.Addr.String()
+	destination := metadata.Destination.String()
+	network := metadata.Network
 
 	t.usersMu.RLock()
 	uid := t.uuidMap[uuid]
@@ -233,6 +242,7 @@ func (t *ConnTracker) RoutedConnection(
 	if us != nil {
 		us.addConn(sourceIP)
 	}
+	t.recordAccess(uid, sourceIP, network, destination)
 
 	connID := t.nextID()
 
@@ -269,6 +279,8 @@ func (t *ConnTracker) RoutedPacketConnection(
 ) N.PacketConn {
 	uuid := metadata.User
 	sourceIP := metadata.Source.Addr.String()
+	destination := metadata.Destination.String()
+	network := metadata.Network
 
 	t.usersMu.RLock()
 	uid := t.uuidMap[uuid]
@@ -290,6 +302,7 @@ func (t *ConnTracker) RoutedPacketConnection(
 	if us != nil {
 		us.addConn(sourceIP)
 	}
+	t.recordAccess(uid, sourceIP, network, destination)
 
 	connID := t.nextID()
 
@@ -438,6 +451,42 @@ func (t *ConnTracker) GetUserTraffic() (traffic map[int][2]int64, aliveIPs map[i
 	}
 	t.usersMu.RUnlock()
 	return
+}
+
+func (t *ConnTracker) FlushRecentAccess() []accesslog.Event {
+	t.accessMu.Lock()
+	events := t.access
+	t.access = nil
+	t.accessMu.Unlock()
+
+	if len(events) == 0 {
+		return nil
+	}
+	cp := make([]accesslog.Event, len(events))
+	copy(cp, events)
+	return cp
+}
+
+func (t *ConnTracker) recordAccess(userID int, sourceIP, network, destination string) {
+	if userID <= 0 || destination == "" {
+		return
+	}
+	event := accesslog.Event{
+		UserID:      userID,
+		XrayEmail:   "user@" + strconv.Itoa(userID),
+		Source:      sourceIP,
+		Network:     network,
+		Destination: destination,
+		Timestamp:   time.Now().Unix(),
+	}
+
+	t.accessMu.Lock()
+	if len(t.access) >= maxAccessEvents {
+		copy(t.access, t.access[len(t.access)-maxAccessEvents+1:])
+		t.access = t.access[:maxAccessEvents-1]
+	}
+	t.access = append(t.access, event)
+	t.accessMu.Unlock()
 }
 
 // CloseByID force-closes a connection by its ID.
