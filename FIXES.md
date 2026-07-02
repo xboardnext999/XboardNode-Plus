@@ -1,4 +1,4 @@
-# XboardNode-Plus 1.21 修复说明
+# XboardNode-Plus 1.22 修复说明
 
 本文记录 XboardNode-Plus 针对运行中用户同步异常的修复内容。
 
@@ -181,6 +181,17 @@ inbound_user_update=reconciled reload_xray=success
 
 sing-box 内核会随连接读写实时累计上传和下载。Xray 内核为了保持 mux/XUDP 兼容，不替换 `transport.Link.Reader`，因此连接级诊断优先统计安全可捕捉的 Writer 方向流量；用户总流量仍由 Xray 内置 stats 管线统计。
 
+### 13. 节点状态上报实际内核
+
+1.22 在节点 metrics 中增加内核字段：
+
+- `configured_kernel`
+- `effective_kernel`
+- `kernel_type`
+- `kernel`
+
+面板诊断插件可以优先显示节点实际运行内核，避免把 `user@1` 这类 Xray 日志用户标识误显示成核心名称。
+
 ## 验证
 
 已补充并通过相关测试：
@@ -196,6 +207,7 @@ sing-box 内核会随连接读写实时累计上传和下载。Xray 内核为了
 - 节点可上报最近访问目标，面板诊断插件可据此显示真实邮箱、来源 IP 和访问目标。
 - 最近访问目标独立快速上报，不再等待普通 report 间隔。
 - 最近访问可按同一连接更新上传、下载和总计流量。
+- 节点会上报实际运行内核，诊断插件可显示 `Xray` 或 `SingBox`。
 
 本地验证命令：
 
@@ -205,7 +217,7 @@ go test ./...
 
 ## 部署建议
 
-升级到 1.21 后，如果再次出现用户无法连接，请优先查看同步日志中的：
+升级到 1.22 后，如果再次出现用户无法连接，请优先查看同步日志中的：
 
 - `previous_users`
 - `fetched_users`

@@ -1425,6 +1425,12 @@ func (s *Service) buildMetrics(status monitor.Status) map[string]interface{} {
 	m["total_connections"] = s.tracker.TotalConnections()
 	m["active_users"] = len(online)
 	m["total_users"] = len(lastUsers)
+	m["configured_kernel"] = s.kernelMode
+	m["effective_kernel"] = s.kernelType
+	m["kernel_type"] = s.kernelType
+	if s.kernel != nil {
+		m["kernel"] = s.kernel.Name()
+	}
 
 	// Speed
 	m["inbound_speed"] = s.tracker.InboundSpeed()
