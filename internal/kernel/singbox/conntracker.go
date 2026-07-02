@@ -144,8 +144,9 @@ type ConnTracker struct {
 	globalMu         sync.RWMutex
 	globalLastUpdate time.Time
 
-	accessMu sync.Mutex
-	access   []accesslog.Event
+	accessMu  sync.Mutex
+	access    map[string]*accesslog.Activity
+	accessSeq atomic.Uint64
 }
 
 // NewConnTracker creates a tracker.
@@ -242,7 +243,7 @@ func (t *ConnTracker) RoutedConnection(
 	if us != nil {
 		us.addConn(sourceIP)
 	}
-	t.recordAccess(uid, sourceIP, network, destination)
+	activity := t.recordAccess(uid, sourceIP, network, destination)
 
 	connID := t.nextID()
 
@@ -265,6 +266,7 @@ func (t *ConnTracker) RoutedConnection(
 		sourceIP: sourceIP,
 		limiter:  lim,
 		ctx:      ctx,
+		access:   activity,
 	}
 }
 
@@ -302,7 +304,7 @@ func (t *ConnTracker) RoutedPacketConnection(
 	if us != nil {
 		us.addConn(sourceIP)
 	}
-	t.recordAccess(uid, sourceIP, network, destination)
+	activity := t.recordAccess(uid, sourceIP, network, destination)
 
 	connID := t.nextID()
 
@@ -320,6 +322,7 @@ func (t *ConnTracker) RoutedPacketConnection(
 		sourceIP:   sourceIP,
 		limiter:    lim,
 		ctx:        ctx,
+		access:     activity,
 	}
 }
 
@@ -455,38 +458,65 @@ func (t *ConnTracker) GetUserTraffic() (traffic map[int][2]int64, aliveIPs map[i
 
 func (t *ConnTracker) FlushRecentAccess() []accesslog.Event {
 	t.accessMu.Lock()
-	events := t.access
-	t.access = nil
+	if len(t.access) == 0 {
+		t.accessMu.Unlock()
+		return nil
+	}
+
+	events := make([]accesslog.Event, 0, len(t.access))
+	for id, activity := range t.access {
+		if event, ok := activity.SnapshotIfChanged(); ok {
+			events = append(events, event)
+		}
+		if activity.Closed() {
+			delete(t.access, id)
+		}
+	}
 	t.accessMu.Unlock()
 
 	if len(events) == 0 {
 		return nil
 	}
-	cp := make([]accesslog.Event, len(events))
-	copy(cp, events)
-	return cp
+	return events
 }
 
-func (t *ConnTracker) recordAccess(userID int, sourceIP, network, destination string) {
+func (t *ConnTracker) recordAccess(userID int, sourceIP, network, destination string) *accesslog.Activity {
 	if userID <= 0 || destination == "" {
-		return
+		return nil
 	}
-	event := accesslog.Event{
+	seq := t.accessSeq.Add(1)
+	sessionID := "singbox-" + strconv.FormatInt(time.Now().UnixNano(), 10) + "-" + strconv.FormatUint(seq, 10)
+	activity := accesslog.NewActivity(accesslog.Event{
+		SessionID:   sessionID,
 		UserID:      userID,
 		XrayEmail:   "user@" + strconv.Itoa(userID),
 		Source:      sourceIP,
 		Network:     network,
 		Destination: destination,
 		Timestamp:   time.Now().Unix(),
-	}
+	})
 
 	t.accessMu.Lock()
-	if len(t.access) >= maxAccessEvents {
-		copy(t.access, t.access[len(t.access)-maxAccessEvents+1:])
-		t.access = t.access[:maxAccessEvents-1]
+	if t.access == nil {
+		t.access = make(map[string]*accesslog.Activity)
 	}
-	t.access = append(t.access, event)
+	if len(t.access) >= maxAccessEvents {
+		for id, existing := range t.access {
+			if existing.Closed() {
+				delete(t.access, id)
+				break
+			}
+		}
+	}
+	if len(t.access) >= maxAccessEvents {
+		for id := range t.access {
+			delete(t.access, id)
+			break
+		}
+	}
+	t.access[sessionID] = activity
 	t.accessMu.Unlock()
+	return activity
 }
 
 // CloseByID force-closes a connection by its ID.
@@ -615,6 +645,7 @@ type trackedConn struct {
 	sourceIP string
 	limiter  *rate.Limiter
 	ctx      context.Context
+	access   *accesslog.Activity
 	closed   atomic.Bool
 }
 
@@ -629,6 +660,7 @@ func (c *trackedConn) Read(b []byte) (int, error) {
 		if c.us != nil {
 			c.us.upload.Add(int64(n)) // 从入站读取 = 用户上传
 		}
+		c.access.AddUpload(int64(n))
 		if c.limiter != nil {
 			// Non-blocking rate limiting
 			if !c.limiter.AllowN(time.Now(), n) {
@@ -677,6 +709,9 @@ func (c *trackedConn) Write(b []byte) (int, error) {
 	if n > 0 && c.us != nil {
 		c.us.download.Add(int64(n)) // 向入站写入 = 用户下载
 	}
+	if n > 0 {
+		c.access.AddDownload(int64(n))
+	}
 	return n, err
 }
 
@@ -685,6 +720,7 @@ func (c *trackedConn) Close() error {
 		if c.us != nil {
 			c.us.removeConn(c.sourceIP)
 		}
+		c.access.Close()
 		c.tracker.removeConnRef(c.connID)
 	}
 	return c.Conn.Close()
@@ -692,12 +728,20 @@ func (c *trackedConn) Close() error {
 
 // makeCountFunc builds a CountFunc for zero-copy byte counting via sing's
 // ReadCounter/WriteCounter unwrap interfaces.
-func (c *trackedConn) makeCountFunc(counter *atomic.Int64) N.CountFunc {
+func (c *trackedConn) makeCountFunc(counter *atomic.Int64, addAccess func(int64)) N.CountFunc {
 	if c.limiter == nil {
-		return func(n int64) { counter.Add(n) }
+		return func(n int64) {
+			counter.Add(n)
+			if addAccess != nil {
+				addAccess(n)
+			}
+		}
 	}
 	return func(n int64) {
 		counter.Add(n)
+		if addAccess != nil {
+			addAccess(n)
+		}
 		// Non-blocking rate limiting with context cancellation
 		if !c.limiter.AllowN(time.Now(), int(n)) {
 			resv := c.limiter.ReserveN(time.Now(), int(n))
@@ -719,14 +763,14 @@ func (c *trackedConn) UnwrapReader() (io.Reader, []N.CountFunc) {
 	if c.us == nil {
 		return c.Conn, nil
 	}
-	return c.Conn, []N.CountFunc{c.makeCountFunc(&c.us.upload)} // 从入站读取 = 用户上传
+	return c.Conn, []N.CountFunc{c.makeCountFunc(&c.us.upload, c.access.AddUpload)} // 从入站读取 = 用户上传
 }
 
 func (c *trackedConn) UnwrapWriter() (io.Writer, []N.CountFunc) {
 	if c.us == nil {
 		return c.Conn, nil
 	}
-	return c.Conn, []N.CountFunc{c.makeCountFunc(&c.us.download)} // 向入站写入 = 用户下载
+	return c.Conn, []N.CountFunc{c.makeCountFunc(&c.us.download, c.access.AddDownload)} // 向入站写入 = 用户下载
 }
 
 func (c *trackedConn) Upstream() any           { return c.Conn }
@@ -744,6 +788,7 @@ type trackedPacketConn struct {
 	sourceIP string
 	limiter  *rate.Limiter
 	ctx      context.Context
+	access   *accesslog.Activity
 	closed   atomic.Bool
 }
 
@@ -754,6 +799,7 @@ func (c *trackedPacketConn) ReadPacket(buffer *buf.Buffer) (singM.Socksaddr, err
 		if c.us != nil {
 			c.us.upload.Add(n) // 从入站读取 = 用户上传
 		}
+		c.access.AddUpload(n)
 		if c.limiter != nil {
 			// Non-blocking rate limiting with context cancellation
 			if !c.limiter.AllowN(time.Now(), int(n)) {
@@ -800,6 +846,9 @@ func (c *trackedPacketConn) WritePacket(buffer *buf.Buffer, dest singM.Socksaddr
 	if err == nil && c.us != nil {
 		c.us.download.Add(n) // 向入站写入 = 用户下载
 	}
+	if err == nil {
+		c.access.AddDownload(n)
+	}
 	return err
 }
 
@@ -808,17 +857,26 @@ func (c *trackedPacketConn) Close() error {
 		if c.us != nil {
 			c.us.removeConn(c.sourceIP)
 		}
+		c.access.Close()
 		c.tracker.removeConnRef(c.connID)
 	}
 	return c.PacketConn.Close()
 }
 
-func (c *trackedPacketConn) makeCountFunc(counter *atomic.Int64) N.CountFunc {
+func (c *trackedPacketConn) makeCountFunc(counter *atomic.Int64, addAccess func(int64)) N.CountFunc {
 	if c.limiter == nil {
-		return func(n int64) { counter.Add(n) }
+		return func(n int64) {
+			counter.Add(n)
+			if addAccess != nil {
+				addAccess(n)
+			}
+		}
 	}
 	return func(n int64) {
 		counter.Add(n)
+		if addAccess != nil {
+			addAccess(n)
+		}
 		// Non-blocking rate limiting with context cancellation
 		if !c.limiter.AllowN(time.Now(), int(n)) {
 			resv := c.limiter.ReserveN(time.Now(), int(n))
@@ -840,14 +898,14 @@ func (c *trackedPacketConn) UnwrapPacketReader() (N.PacketReader, []N.CountFunc)
 	if c.us == nil {
 		return c.PacketConn, nil
 	}
-	return c.PacketConn, []N.CountFunc{c.makeCountFunc(&c.us.download)}
+	return c.PacketConn, []N.CountFunc{c.makeCountFunc(&c.us.download, c.access.AddDownload)}
 }
 
 func (c *trackedPacketConn) UnwrapPacketWriter() (N.PacketWriter, []N.CountFunc) {
 	if c.us == nil {
 		return c.PacketConn, nil
 	}
-	return c.PacketConn, []N.CountFunc{c.makeCountFunc(&c.us.upload)}
+	return c.PacketConn, []N.CountFunc{c.makeCountFunc(&c.us.upload, c.access.AddUpload)}
 }
 
 func (c *trackedPacketConn) Upstream() any           { return c.PacketConn }

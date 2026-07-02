@@ -1,4 +1,4 @@
-# XboardNode-Plus 1.20 修复说明
+# XboardNode-Plus 1.21 修复说明
 
 本文记录 XboardNode-Plus 针对运行中用户同步异常的修复内容。
 
@@ -165,6 +165,22 @@ inbound_user_update=reconciled reload_xray=success
 - access-only 上报不会附带 CPU/内存/硬盘状态，避免高频诊断上报覆盖节点负载状态。
 - 支持配置 `node.access_report_interval` 调整间隔。
 
+### 12. 最近访问增加连接流量统计
+
+1.21 在最近访问上报中增加连接级流量字段：
+
+- `session_id`：同一条连接的稳定 ID，面板可据此更新同一行记录。
+- `upload`：该连接当前累计上传字节数。
+- `download`：该连接当前累计下载字节数。
+
+面板诊断插件可展示：
+
+```text
+时间 | ID | 邮箱 | 用户IP | 协议 | 访问网站和端口 | 上传 | 下载 | 总计
+```
+
+sing-box 内核会随连接读写实时累计上传和下载。Xray 内核为了保持 mux/XUDP 兼容，不替换 `transport.Link.Reader`，因此连接级诊断优先统计安全可捕捉的 Writer 方向流量；用户总流量仍由 Xray 内置 stats 管线统计。
+
 ## 验证
 
 已补充并通过相关测试：
@@ -179,6 +195,7 @@ inbound_user_update=reconciled reload_xray=success
 - Xray 用户快照未变化时会按间隔执行完整用户表自愈重建。
 - 节点可上报最近访问目标，面板诊断插件可据此显示真实邮箱、来源 IP 和访问目标。
 - 最近访问目标独立快速上报，不再等待普通 report 间隔。
+- 最近访问可按同一连接更新上传、下载和总计流量。
 
 本地验证命令：
 
@@ -188,7 +205,7 @@ go test ./...
 
 ## 部署建议
 
-升级到 1.20 后，如果再次出现用户无法连接，请优先查看同步日志中的：
+升级到 1.21 后，如果再次出现用户无法连接，请优先查看同步日志中的：
 
 - `previous_users`
 - `fetched_users`

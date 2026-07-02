@@ -4,6 +4,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/cedar2025/xboard-node/internal/accesslog"
 	"github.com/cedar2025/xboard-node/internal/model"
 	"github.com/xtls/xray-core/common/buf"
 	"github.com/xtls/xray-core/transport"
@@ -185,7 +186,6 @@ func TestLimitDispatcher_UnlimitedUserFastPath(t *testing.T) {
 	}
 }
 
-
 func TestLimitDispatcher_TrackLinkPreservesReader(t *testing.T) {
 	ld := newTestDispatcher()
 	email := userEmail(1)
@@ -195,7 +195,7 @@ func TestLimitDispatcher_TrackLinkPreservesReader(t *testing.T) {
 	origWriter := &closeTrackingWriter{Writer: buf.Discard, onClose: func() {}}
 	link := &transport.Link{Reader: origReader, Writer: origWriter}
 
-	ld.trackLink(link, email, "1.1.1.1", true)
+	ld.trackLink(link, email, "1.1.1.1", true, nil)
 
 	if link.Reader != origReader {
 		t.Fatal("trackLink must not replace link.Reader")
@@ -213,8 +213,9 @@ func TestLimitDispatcher_CloseTrackingWriterReleasesConn(t *testing.T) {
 		t.Fatal("first connection should be allowed")
 	}
 
+	activity := accesslog.NewActivity(accesslog.Event{SessionID: "test-session", UserID: 1})
 	link := &transport.Link{Reader: nopReader{}, Writer: buf.Discard}
-	ld.trackLink(link, email, "1.1.1.1", true)
+	ld.trackLink(link, email, "1.1.1.1", true, activity)
 
 	if got := ld.connCount.Load(); got != 1 {
 		t.Fatalf("expected connCount=1 after tracking, got %d", got)
@@ -222,6 +223,16 @@ func TestLimitDispatcher_CloseTrackingWriterReleasesConn(t *testing.T) {
 	cw, ok := link.Writer.(*closeTrackingWriter)
 	if !ok {
 		t.Fatal("expected closeTrackingWriter wrapper")
+	}
+	if err := cw.WriteMultiBuffer(buf.MergeBytes(nil, []byte("hello"))); err != nil {
+		t.Fatalf("WriteMultiBuffer() error = %v", err)
+	}
+	event, ok := activity.SnapshotIfChanged()
+	if !ok {
+		t.Fatal("expected changed access activity")
+	}
+	if event.Upload != 5 || event.Download != 0 {
+		t.Fatalf("access traffic = [%d %d], want [5 0]", event.Upload, event.Download)
 	}
 	if err := cw.Close(); err != nil {
 		t.Fatalf("closeTrackingWriter.Close() error = %v", err)

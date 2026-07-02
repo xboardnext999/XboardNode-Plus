@@ -3,6 +3,7 @@ package xray
 import (
 	"context"
 	"errors"
+	"fmt"
 	"reflect"
 	"sort"
 	"sync"
@@ -65,10 +66,10 @@ func limitDispatcherFactory(ctx context.Context, config interface{}) (interface{
 // LimitDispatcher wraps xray's DefaultDispatcher to enforce per-user
 // admission checks before a request is dispatched into xray-core.
 //
-// It intentionally does NOT mutate transport.Link.Reader/Writer. Xray's
-// mux/XUDP close path requires the original concrete *pipe.Reader to remain
-// intact, so the dispatcher is limited to gate-keeping and safe connection
-// lifecycle bookkeeping.
+// It intentionally does NOT mutate transport.Link.Reader. Xray's mux/XUDP
+// close path requires the original concrete *pipe.Reader to remain intact, so
+// download-side per-connection byte accounting stays in xray-core stats while
+// the dispatcher can safely wrap Writer for lifecycle and upload diagnostics.
 type LimitDispatcher struct {
 	inner     interface{}        // original DefaultDispatcher (Feature + Dispatcher)
 	innerDisp routing.Dispatcher // same object, typed as Dispatcher
@@ -80,8 +81,9 @@ type LimitDispatcher struct {
 	deviceLimits map[string]int            // email → max devices
 	emailToUID   map[string]int            // email → panel user ID
 
-	accessMu sync.Mutex
-	access   []accesslog.Event
+	accessMu  sync.Mutex
+	access    map[string]*accesslog.Activity
+	accessSeq atomic.Uint64
 
 	// unlimitedIPs: users without device limit — sync.Map for lock-free access.
 	// Each entry is *ipCounter{ips sync.Map}.
@@ -124,8 +126,8 @@ func (d *LimitDispatcher) Dispatch(ctx context.Context, dest net.Destination) (*
 	}
 
 	if email != "" {
-		d.recordAccess(email, sourceIP, dest)
-		d.trackLink(link, email, sourceIP, isTCP)
+		activity := d.recordAccess(email, sourceIP, dest)
+		d.trackLink(link, email, sourceIP, isTCP, activity)
 	}
 	return link, nil
 }
@@ -137,8 +139,8 @@ func (d *LimitDispatcher) DispatchLink(ctx context.Context, dest net.Destination
 	}
 
 	if email != "" {
-		d.recordAccess(email, sourceIP, dest)
-		d.trackLink(link, email, sourceIP, isTCP)
+		activity := d.recordAccess(email, sourceIP, dest)
+		d.trackLink(link, email, sourceIP, isTCP, activity)
 	}
 	return d.innerDisp.DispatchLink(ctx, dest, link)
 }
@@ -162,22 +164,24 @@ func (d *LimitDispatcher) identifyAndCheck(ctx context.Context, dest net.Destina
 	return email, sourceIP, isTCP, nil
 }
 
-// trackLink records connection lifecycle without mutating xray-core owned
-// transport primitives. This keeps mux/XUDP compatible while still allowing
-// the dispatcher to release device-limit state when the link closes.
-func (d *LimitDispatcher) trackLink(link *transport.Link, email, sourceIP string, isTCP bool) {
+// trackLink records connection lifecycle without replacing link.Reader. This
+// keeps mux/XUDP compatible while still allowing the dispatcher to release
+// device-limit state when the link closes.
+func (d *LimitDispatcher) trackLink(link *transport.Link, email, sourceIP string, isTCP bool, activity *accesslog.Activity) {
 	d.connCount.Add(1)
 
 	onClose := func() {
 		if isTCP {
 			d.delConn(email, sourceIP)
 		}
+		activity.Close()
 		d.connCount.Add(-1)
 	}
 
 	link.Writer = &closeTrackingWriter{
 		Writer:  link.Writer,
 		onClose: onClose,
+		access:  activity,
 	}
 }
 
@@ -225,42 +229,69 @@ func (d *LimitDispatcher) ResetConns() {
 
 func (d *LimitDispatcher) FlushRecentAccess() []accesslog.Event {
 	d.accessMu.Lock()
-	events := d.access
-	d.access = nil
+	if len(d.access) == 0 {
+		d.accessMu.Unlock()
+		return nil
+	}
+
+	events := make([]accesslog.Event, 0, len(d.access))
+	for id, activity := range d.access {
+		if event, ok := activity.SnapshotIfChanged(); ok {
+			events = append(events, event)
+		}
+		if activity.Closed() {
+			delete(d.access, id)
+		}
+	}
 	d.accessMu.Unlock()
 
 	if len(events) == 0 {
 		return nil
 	}
-	cp := make([]accesslog.Event, len(events))
-	copy(cp, events)
-	return cp
+	return events
 }
 
-func (d *LimitDispatcher) recordAccess(email, sourceIP string, dest net.Destination) {
+func (d *LimitDispatcher) recordAccess(email, sourceIP string, dest net.Destination) *accesslog.Activity {
 	d.mu.RLock()
 	uid := d.emailToUID[email]
 	d.mu.RUnlock()
 	if uid <= 0 {
-		return
+		return nil
 	}
 
-	event := accesslog.Event{
+	seq := d.accessSeq.Add(1)
+	sessionID := fmt.Sprintf("xray-%d-%d", time.Now().UnixNano(), seq)
+	activity := accesslog.NewActivity(accesslog.Event{
+		SessionID:   sessionID,
 		UserID:      uid,
 		XrayEmail:   email,
 		Source:      sourceIP,
 		Network:     dest.Network.SystemString(),
 		Destination: dest.String(),
 		Timestamp:   time.Now().Unix(),
-	}
+	})
 
 	d.accessMu.Lock()
-	if len(d.access) >= maxAccessEvents {
-		copy(d.access, d.access[len(d.access)-maxAccessEvents+1:])
-		d.access = d.access[:maxAccessEvents-1]
+	if d.access == nil {
+		d.access = make(map[string]*accesslog.Activity)
 	}
-	d.access = append(d.access, event)
+	if len(d.access) >= maxAccessEvents {
+		for id, existing := range d.access {
+			if existing.Closed() {
+				delete(d.access, id)
+				break
+			}
+		}
+	}
+	if len(d.access) >= maxAccessEvents {
+		for id := range d.access {
+			delete(d.access, id)
+			break
+		}
+	}
+	d.access[sessionID] = activity
 	d.accessMu.Unlock()
+	return activity
 }
 
 // GetConnectionState returns dispatcher-tracked alive IPs and connection count.
@@ -438,7 +469,17 @@ func (d *LimitDispatcher) delConn(email, sourceIP string) {
 type closeTrackingWriter struct {
 	buf.Writer
 	onClose func()
+	access  *accesslog.Activity
 	closed  atomic.Bool
+}
+
+func (w *closeTrackingWriter) WriteMultiBuffer(mb buf.MultiBuffer) error {
+	n := int64(mb.Len())
+	err := w.Writer.WriteMultiBuffer(mb)
+	if err == nil {
+		w.access.AddUpload(n)
+	}
+	return err
 }
 
 func (w *closeTrackingWriter) Close() error {

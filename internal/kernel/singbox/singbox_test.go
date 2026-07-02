@@ -36,8 +36,6 @@ func TestSingBoxCapabilities(t *testing.T) {
 	}
 }
 
-
-
 type testConn struct {
 	closed bool
 	reads  [][]byte
@@ -60,11 +58,11 @@ func (c *testConn) Write(b []byte) (int, error) {
 	return len(b), nil
 }
 
-func (c *testConn) Close() error { c.closed = true; return nil }
-func (c *testConn) LocalAddr() net.Addr { return &net.TCPAddr{} }
-func (c *testConn) RemoteAddr() net.Addr { return &net.TCPAddr{} }
-func (c *testConn) SetDeadline(time.Time) error { return nil }
-func (c *testConn) SetReadDeadline(time.Time) error { return nil }
+func (c *testConn) Close() error                     { c.closed = true; return nil }
+func (c *testConn) LocalAddr() net.Addr              { return &net.TCPAddr{} }
+func (c *testConn) RemoteAddr() net.Addr             { return &net.TCPAddr{} }
+func (c *testConn) SetDeadline(time.Time) error      { return nil }
+func (c *testConn) SetReadDeadline(time.Time) error  { return nil }
 func (c *testConn) SetWriteDeadline(time.Time) error { return nil }
 
 func testInboundContext(uuid, ip string) adapter.InboundContext {
@@ -96,6 +94,16 @@ func TestConnTrackerRoutedConnectionTracksTrafficAndAliveIPs(t *testing.T) {
 	traffic, aliveIPs, connCount := tracker.GetUserTraffic()
 	if got := traffic[1]; got != [2]int64{5, 3} {
 		t.Fatalf("traffic[1] = %v, want [5 3]", got)
+	}
+	events := tracker.FlushRecentAccess()
+	if len(events) != 1 {
+		t.Fatalf("FlushRecentAccess() returned %d events, want 1", len(events))
+	}
+	if events[0].SessionID == "" {
+		t.Fatal("access event should include a session id")
+	}
+	if events[0].Upload != 5 || events[0].Download != 3 {
+		t.Fatalf("access traffic = [%d %d], want [5 3]", events[0].Upload, events[0].Download)
 	}
 	if !aliveIPs[1]["1.1.1.1"] {
 		t.Fatal("expected alive IP to include source address")
