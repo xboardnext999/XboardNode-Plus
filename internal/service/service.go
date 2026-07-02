@@ -63,8 +63,9 @@ type Service struct {
 	pushBackoff    apiBackoff // backoff for panel push failures
 
 	// pushActive prevents overlapping push/pull goroutines.
-	pushActive atomic.Bool
-	pullActive atomic.Bool
+	pushActive       atomic.Bool
+	accessPushActive atomic.Bool
+	pullActive       atomic.Bool
 	// pullResults delivers async pullViaAPI results back to the main goroutine.
 	pullResults chan pullResult
 
@@ -301,8 +302,10 @@ func (s *Service) Run(ctx context.Context) error {
 	// Set up tickers
 	trackTicker := time.NewTicker(time.Duration(s.cfg.Node.TrackInterval) * time.Second)
 	pushInterval := time.Duration(math.Max(float64(s.pushInterval), 5)) * time.Second
+	accessReportInterval := time.Duration(math.Max(float64(s.cfg.Node.AccessReportInterval), 1)) * time.Second
 	pullInterval := time.Duration(s.pullInterval) * time.Second
 	reportTicker := time.NewTicker(pushInterval)
+	accessReportTicker := time.NewTicker(accessReportInterval)
 	pullTicker := time.NewTicker(pullInterval)
 	deviceReportTicker := time.NewTicker(time.Duration(s.cfg.Node.DeviceReportInterval) * time.Second)
 
@@ -313,6 +316,7 @@ func (s *Service) Run(ctx context.Context) error {
 
 	defer trackTicker.Stop()
 	defer reportTicker.Stop()
+	defer accessReportTicker.Stop()
 	defer pullTicker.Stop()
 	defer deviceReportTicker.Stop()
 	defer wsDiscoveryTicker.Stop()
@@ -330,6 +334,9 @@ func (s *Service) Run(ctx context.Context) error {
 
 		case <-reportTicker.C:
 			s.pushReportAsync()
+
+		case <-accessReportTicker.C:
+			s.pushAccessAsync()
 
 		case <-deviceReportTicker.C:
 			s.reportDevices()
@@ -1347,6 +1354,36 @@ func (s *Service) pushReportAsync() {
 		}
 		s.pushBackoff.onSuccess()
 		nlog.ReportPushed(len(traffic), len(online))
+	}()
+}
+
+// pushAccessAsync sends recent per-connection destinations on a short interval
+// so the diagnostic dashboard can update without waiting for the normal report
+// interval. It intentionally sends only the access payload.
+func (s *Service) pushAccessAsync() {
+	if !s.sink.SupportsReporting() {
+		return
+	}
+	if s.pushBackoff.shouldSkip() {
+		return
+	}
+	if !s.accessPushActive.CompareAndSwap(false, true) {
+		return
+	}
+
+	access := s.kernel.FlushRecentAccess()
+	if len(access) == 0 {
+		s.accessPushActive.Store(false)
+		return
+	}
+
+	go func() {
+		defer s.accessPushActive.Store(false)
+		if err := s.sink.Report(controlplane.ReportPayload{Access: access}); err != nil {
+			nlog.Core().Warn("failed to push access report", "error", err, "events", len(access))
+			return
+		}
+		nlog.Core().Debug("access report pushed", "events", len(access))
 	}()
 }
 

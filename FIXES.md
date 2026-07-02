@@ -1,4 +1,4 @@
-# XboardNode-Plus 1.19 修复说明
+# XboardNode-Plus 1.20 修复说明
 
 本文记录 XboardNode-Plus 针对运行中用户同步异常的修复内容。
 
@@ -154,6 +154,17 @@ inbound_user_update=reconciled reload_xray=success
 
 说明：HTTPS 连接只能看到域名或 IP 与端口，不能看到完整 URL 路径。
 
+### 11. 最近访问改为快速独立上报
+
+1.19 中最近访问目标跟随普通 report 一起上报，如果面板设置的 `server_push_interval` 是 60 秒，看板即使 3 秒刷新，也只能等下一次普通 report 后才看到新访问记录。
+
+1.20 增加独立的 access 上报 ticker：
+
+- 默认每 3 秒上报一次最近访问目标。
+- 仅有访问记录时才请求面板，空队列不会发送。
+- access-only 上报不会附带 CPU/内存/硬盘状态，避免高频诊断上报覆盖节点负载状态。
+- 支持配置 `node.access_report_interval` 调整间隔。
+
 ## 验证
 
 已补充并通过相关测试：
@@ -167,6 +178,7 @@ inbound_user_update=reconciled reload_xray=success
 - Xray 用户热更新失败不会错误更新内存状态。
 - Xray 用户快照未变化时会按间隔执行完整用户表自愈重建。
 - 节点可上报最近访问目标，面板诊断插件可据此显示真实邮箱、来源 IP 和访问目标。
+- 最近访问目标独立快速上报，不再等待普通 report 间隔。
 
 本地验证命令：
 
@@ -176,7 +188,7 @@ go test ./...
 
 ## 部署建议
 
-升级到 1.19 后，如果再次出现用户无法连接，请优先查看同步日志中的：
+升级到 1.20 后，如果再次出现用户无法连接，请优先查看同步日志中的：
 
 - `previous_users`
 - `fetched_users`

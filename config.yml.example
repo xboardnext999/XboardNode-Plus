@@ -12,6 +12,8 @@
 #   type: "singbox"
 # log:
 #   level: "info"
+# node:
+#   access_report_interval: 3  # 最近访问目标快速上报间隔，单位秒
 # instances:
 #   - panel:
 #       url: "https://panel.example.com"

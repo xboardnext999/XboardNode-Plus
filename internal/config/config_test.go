@@ -89,6 +89,9 @@ panel:
 	if cfg.Cert.CertDir != expectedCertDir {
 		t.Errorf("default cert_dir: got %q, want %q", cfg.Cert.CertDir, expectedCertDir)
 	}
+	if cfg.Node.AccessReportInterval != 3 {
+		t.Errorf("default access_report_interval: got %d, want 3", cfg.Node.AccessReportInterval)
+	}
 }
 
 func TestLoad_MissingURL(t *testing.T) {
@@ -276,6 +279,7 @@ panel:
 node:
   push_interval: 30
   pull_interval: 60
+  access_report_interval: 4
 `)
 	cfg, err := Load(path)
 	if err != nil {
@@ -286,6 +290,9 @@ node:
 	}
 	if cfg.Node.PullInterval != 60 {
 		t.Errorf("pull_interval: got %d", cfg.Node.PullInterval)
+	}
+	if cfg.Node.AccessReportInterval != 4 {
+		t.Errorf("access_report_interval: got %d", cfg.Node.AccessReportInterval)
 	}
 }
 
@@ -439,6 +446,7 @@ kernel:
 node:
   push_interval: 42
   pull_interval: 99
+  access_report_interval: 7
 instances:
   - panel:
       url: "https://panel.example.com"
@@ -477,6 +485,9 @@ instances:
 	}
 	if inst0.Node.PullInterval != 99 {
 		t.Errorf("inst0 pull_interval: got %d, want 99", inst0.Node.PullInterval)
+	}
+	if inst0.Node.AccessReportInterval != 7 {
+		t.Errorf("inst0 access_report_interval: got %d, want 7", inst0.Node.AccessReportInterval)
 	}
 	// Instance 1: overrides log.level, inherits the rest.
 	inst1 := root.Instances[1]

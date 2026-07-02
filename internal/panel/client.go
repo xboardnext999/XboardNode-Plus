@@ -158,15 +158,14 @@ func (c *Client) Report(traffic map[int][2]int64, alive map[int][]string, online
 		payload["access"] = access
 	}
 
-	status := map[string]interface{}{
-		"cpu":  cpu,
-		"mem":  map[string]interface{}{"total": mem[0], "used": mem[1]},
-		"swap": map[string]interface{}{"total": swap[0], "used": swap[1]},
-		"disk": map[string]interface{}{"total": disk[0], "used": disk[1]},
-	}
-	payload["status"] = status
-
 	if len(metrics) > 0 {
+		status := map[string]interface{}{
+			"cpu":  cpu,
+			"mem":  map[string]interface{}{"total": mem[0], "used": mem[1]},
+			"swap": map[string]interface{}{"total": swap[0], "used": swap[1]},
+			"disk": map[string]interface{}{"total": disk[0], "used": disk[1]},
+		}
+		payload["status"] = status
 		payload["metrics"] = metrics
 	}
 
