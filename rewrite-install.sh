@@ -3,6 +3,8 @@ set -euo pipefail
 
 OLD_URL="https://raw.githubusercontent.com/cedar2025/xboard-node/dev/install.sh"
 NEW_URL="https://raw.githubusercontent.com/xboardnext999/XboardNode-Plus/dev/install.sh"
+REPO_URL="https://github.com/xboardnext999/XboardNode-Plus.git"
+REPO_BRANCH="dev"
 PRINT_ONLY=0
 
 usage() {
@@ -18,6 +20,9 @@ Then paste the original cedar2025 install command. The script will replace:
 with:
   ${NEW_URL}
 and execute the converted command.
+
+If raw.githubusercontent.com is rate-limited, the script will fall back to
+cloning ${REPO_URL} and running install.sh locally with the same arguments.
 EOF
 }
 
@@ -38,6 +43,49 @@ mask_token() {
         -e "s/(--token[[:space:]]+)'[^']*'/\1'***'/g" \
         -e 's/(--token[[:space:]]+)"[^"]*"/\1"***"/g' \
         -e 's/(--token[[:space:]]+)[^[:space:]]+/\1***/g'
+}
+
+extract_installer_args() {
+    local cmd="$1"
+    case "$cmd" in
+        *"bash -s -- "*)
+            printf '%s\n' "${cmd#*bash -s -- }"
+            ;;
+        *"bash -s --")
+            printf '\n'
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
+fallback_install_from_git() {
+    local cmd="$1"
+    local args_str
+    if ! args_str="$(extract_installer_args "$cmd")"; then
+        return 1
+    fi
+
+    local tmp_dir status runner
+    tmp_dir="$(mktemp -d)"
+    say "直接下载安装脚本失败，尝试使用 git clone 方式安装..."
+    if ! git clone --depth 1 -b "$REPO_BRANCH" "$REPO_URL" "$tmp_dir"; then
+        rm -rf "$tmp_dir"
+        return 1
+    fi
+
+    runner="bash"
+    if [[ "$cmd" == *"| sudo bash"* ]] || [[ "$cmd" == *"sudo bash -s"* ]]; then
+        runner="sudo bash"
+    fi
+
+    set +e
+    bash -lc "$runner $(printf '%q' "$tmp_dir/install.sh") $args_str"
+    status=$?
+    set -e
+    rm -rf "$tmp_dir"
+    return "$status"
 }
 
 read_command() {
@@ -88,10 +136,20 @@ fi
 masked_cmd="$(printf '%s' "$converted_cmd" | mask_token)"
 say "将执行替换后的命令："
 say "$masked_cmd"
+say "提示：上面的 token 仅为显示时脱敏，实际执行会使用你粘贴命令中的原始 token。"
 
 if [ "$PRINT_ONLY" -eq 1 ]; then
     printf '%s\n' "$converted_cmd"
     exit 0
 fi
 
-bash -lc "$converted_cmd"
+set +e
+bash -o pipefail -lc "$converted_cmd"
+status=$?
+set -e
+if [ "$status" -ne 0 ]; then
+    if fallback_install_from_git "$converted_cmd"; then
+        exit 0
+    fi
+    exit "$status"
+fi

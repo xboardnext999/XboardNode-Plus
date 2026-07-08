@@ -48,6 +48,18 @@ func TestBuildInbound_Shadowsocks(t *testing.T) {
 	assertMapValue(t, users[0], "password", "aaaaaaaa-1111-2222-3333-444444444444")
 }
 
+func TestBuildInbound_UsesListenIP(t *testing.T) {
+	nc := &panel.NodeConfig{
+		Protocol:   "shadowsocks",
+		ListenIP:   "127.0.0.1",
+		ServerPort: 10443,
+		Cipher:     "aes-128-gcm",
+	}
+	inbound := buildInbound(testNodeSpec(nc), testUsers, kernel.TLSCert{})
+	assertMapValue(t, inbound, "listen", "127.0.0.1")
+	assertMapValue(t, inbound, "listen_port", 10443)
+}
+
 func TestBuildInbound_Shadowsocks2022(t *testing.T) {
 	nc := &panel.NodeConfig{
 		Protocol:   "shadowsocks",
