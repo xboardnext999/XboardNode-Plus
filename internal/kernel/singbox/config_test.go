@@ -669,6 +669,28 @@ func TestBuildRoutes_Default(t *testing.T) {
 	assertMapValue(t, rules[1], "outbound", "block")
 }
 
+func TestBuildConfig_TrojanFallbackLoopbackRouteBeforePrivateBlock(t *testing.T) {
+	nc := testNodeSpec(&panel.NodeConfig{
+		Protocol:   "trojan",
+		ServerPort: 10443,
+		TLSSettings: map[string]interface{}{
+			"fallback": "127.0.0.1:8080",
+		},
+	})
+	cfg := buildConfig(config.KernelConfig{LogLevel: "warn"}, nc, testUsers, kernel.TLSCert{})
+	route := cfg["route"].(M)
+	rules := route["rules"].([]M)
+	if len(rules) < 3 {
+		t.Fatalf("expected fallback direct route plus default rules, got %d", len(rules))
+	}
+	assertMapValue(t, rules[0], "outbound", "direct")
+	cidrs, ok := rules[0]["ip_cidr"].([]string)
+	if !ok || len(cidrs) != 1 || cidrs[0] != "127.0.0.1/32" {
+		t.Fatalf("fallback route cidrs = %#v, want [127.0.0.1/32]", rules[0]["ip_cidr"])
+	}
+	assertMapValue(t, rules[1], "outbound", "block")
+}
+
 func TestBuildRoutes_WithCustomRules(t *testing.T) {
 	rules := []panel.RouteRule{
 		{ID: 1, Match: []string{"blocked.com"}, Action: "block"},

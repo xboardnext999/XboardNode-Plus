@@ -58,8 +58,9 @@ func buildConfig(kcfg config.KernelConfig, nc *model.NodeSpec, users []model.Use
 		cfg["inbounds"] = []M{inbound}
 	}
 
-	// Merge panel routes and static config routes
-	cfg["route"] = buildRoutes(nc.Routes, nc.CustomRouteRules, mergeRouteList(nc.CustomRoutes, kcfg.CustomRoute))
+	// Merge panel routes and static config routes. Trojan fallback to a local
+	// camouflage site must bypass the default private-address block below.
+	cfg["route"] = buildRoutes(nc.Routes, nc.CustomRouteRules, mergeRouteList(trojanFallbackDirectRoutes(nc), mergeRouteList(nc.CustomRoutes, kcfg.CustomRoute)))
 
 	// Automatically enable rule_set caching (cache_file) when panel routes
 	// reference geoip:/geosite: entries so that the downloaded .srs rule_set
@@ -142,6 +143,38 @@ func mergeRouteList(a, b []map[string]any) []map[string]any {
 	res = append(res, a...)
 	res = append(res, b...)
 	return res
+}
+
+func trojanFallbackDirectRoutes(nc *model.NodeSpec) []map[string]any {
+	if nc == nil || !strings.EqualFold(nc.Protocol, "trojan") {
+		return nil
+	}
+	fallback := buildTrojanFallback(nc)
+	if fallback == nil {
+		return nil
+	}
+	server := strings.TrimSpace(stringFromAny(fallback["server"]))
+	if server == "" {
+		return nil
+	}
+
+	var cidrs []string
+	if strings.EqualFold(server, "localhost") {
+		cidrs = append(cidrs, "127.0.0.1/32", "::1/128")
+	} else if ip := net.ParseIP(server); ip != nil && ip.IsLoopback() {
+		if ip.To4() != nil {
+			cidrs = append(cidrs, ip.String()+"/32")
+		} else {
+			cidrs = append(cidrs, ip.String()+"/128")
+		}
+	}
+	if len(cidrs) == 0 {
+		return nil
+	}
+	return []map[string]any{{
+		"outbound": "direct",
+		"ip_cidr":  cidrs,
+	}}
 }
 
 func buildRoutes(panelRoutes []model.RouteRule, customRules []model.CustomRouteRule, custom []map[string]any) M {
