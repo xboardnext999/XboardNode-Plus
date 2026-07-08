@@ -143,3 +143,6 @@ jobs:
             dist/xboard-node-linux-arm64
             dist/xbctl-linux-amd64
             dist/xbctl-linux-arm64
+            easy-install.sh
+            install.sh
+            rewrite-install.sh

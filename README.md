@@ -58,6 +58,19 @@ docker compose up -d
 
 ### Installer (Linux systemd)
 
+Use the release installer when `raw.githubusercontent.com` is rate-limited:
+
+```bash
+curl -fL https://github.com/xboardnext999/XboardNode-Plus/releases/latest/download/easy-install.sh | \
+  sudo bash -s -- \
+    --panel https://panel.example.com \
+    --token TOKEN \
+    --machine-id 1 \
+    --domain node.example.com
+```
+
+This installs the service, downloads release binaries, configures nginx Trojan SNI passthrough, and creates a local camouflage site.
+
 ```bash
 # Node mode
 curl -fsSL https://raw.githubusercontent.com/xboardnext999/XboardNode-Plus/dev/install.sh | \
