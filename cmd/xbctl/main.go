@@ -85,10 +85,12 @@ type fileMachineConfig struct {
 }
 
 type fileNodeConfig struct {
-	PushInterval         int `yaml:"push_interval,omitempty"`
-	PullInterval         int `yaml:"pull_interval,omitempty"`
-	TrackInterval        int `yaml:"track_interval,omitempty"`
-	DeviceReportInterval int `yaml:"device_report_interval,omitempty"`
+	PushInterval         int    `yaml:"push_interval,omitempty"`
+	PullInterval         int    `yaml:"pull_interval,omitempty"`
+	TrackInterval        int    `yaml:"track_interval,omitempty"`
+	DeviceReportInterval int    `yaml:"device_report_interval,omitempty"`
+	AccessReportInterval int    `yaml:"access_report_interval,omitempty"`
+	TrojanFallback       string `yaml:"trojan_fallback,omitempty"`
 }
 
 type fileKernelConfig struct {
@@ -865,12 +867,14 @@ func writeRootConfig(path string, root *config.RootConfig) error {
 	if p.Kernel.Type != "" || p.Kernel.LogLevel != "" {
 		out.Kernel = &fileKernelConfig{Type: p.Kernel.Type, LogLevel: p.Kernel.LogLevel}
 	}
-	if p.Node.PushInterval != 0 || p.Node.PullInterval != 0 || p.Node.TrackInterval != 0 || p.Node.DeviceReportInterval != 0 {
+	if p.Node.PushInterval != 0 || p.Node.PullInterval != 0 || p.Node.TrackInterval != 0 || p.Node.DeviceReportInterval != 0 || p.Node.AccessReportInterval != 0 || p.Node.TrojanFallback != "" {
 		out.Node = &fileNodeConfig{
 			PushInterval:         p.Node.PushInterval,
 			PullInterval:         p.Node.PullInterval,
 			TrackInterval:        p.Node.TrackInterval,
 			DeviceReportInterval: p.Node.DeviceReportInterval,
+			AccessReportInterval: p.Node.AccessReportInterval,
+			TrojanFallback:       p.Node.TrojanFallback,
 		}
 	}
 	if p.Runtime.GoMemLimit != "" || p.Runtime.GoGCPercent != 0 {
@@ -907,12 +911,15 @@ func writeRootConfig(path string, root *config.RootConfig) error {
 			},
 			HealthPort: inst.HealthPort,
 		}
-		if !inst.IsMachineMode() && (inst.Node.PushInterval != 0 || inst.Node.PullInterval != 0 || inst.Node.TrackInterval != 0 || inst.Node.DeviceReportInterval != 0) {
+		instanceHasNodeIntervals := inst.Node.PushInterval != 0 || inst.Node.PullInterval != 0 || inst.Node.TrackInterval != 0 || inst.Node.DeviceReportInterval != 0 || inst.Node.AccessReportInterval != 0
+		if (!inst.IsMachineMode() && instanceHasNodeIntervals) || inst.Node.TrojanFallback != "" {
 			fi.Node = &fileNodeConfig{
 				PushInterval:         inst.Node.PushInterval,
 				PullInterval:         inst.Node.PullInterval,
 				TrackInterval:        inst.Node.TrackInterval,
 				DeviceReportInterval: inst.Node.DeviceReportInterval,
+				AccessReportInterval: inst.Node.AccessReportInterval,
+				TrojanFallback:       inst.Node.TrojanFallback,
 			}
 		}
 		if inst.Runtime.GoMemLimit != "" || inst.Runtime.GoGCPercent != 0 {
@@ -1204,13 +1211,15 @@ func machineIDPtr(cfg *config.Config) *int {
 
 func runConfig(args []string) error {
 	if len(args) == 0 {
-		return errors.New("usage: xbctl config <init|health-port>")
+		return errors.New("usage: xbctl config <init|health-port|trojan-fallback>")
 	}
 	switch args[0] {
 	case "init":
 		return runConfigInit(args[1:])
 	case "health-port":
 		return runConfigHealthPort(args[1:])
+	case "trojan-fallback":
+		return runConfigTrojanFallback(args[1:])
 	default:
 		return fmt.Errorf("unknown config command: %s", args[0])
 	}
@@ -1570,5 +1579,85 @@ func runConfigHealthPort(args []string) error {
 	if root.Config.HealthPort > 0 {
 		fmt.Println(root.Config.HealthPort)
 	}
+	return nil
+}
+
+func runConfigTrojanFallback(args []string) error {
+	cfgPath := defaultConfigPath
+	target := ""
+	clear := false
+	restart := false
+
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--config":
+			if i+1 >= len(args) {
+				return errors.New("--config requires a path")
+			}
+			i++
+			cfgPath = args[i]
+		case "--target":
+			if i+1 >= len(args) {
+				return errors.New("--target requires HOST:PORT")
+			}
+			i++
+			target = strings.TrimSpace(args[i])
+		case "--clear":
+			clear = true
+		case "--restart":
+			restart = true
+		default:
+			return fmt.Errorf("unknown trojan-fallback flag: %s", args[i])
+		}
+	}
+
+	if clear {
+		target = ""
+	} else if target == "" {
+		return errors.New("usage: xbctl config trojan-fallback --target HOST:PORT [--restart] (or --clear)")
+	} else if !strings.Contains(target, ":") {
+		return fmt.Errorf("invalid --target %q: expected HOST:PORT", target)
+	}
+
+	root, err := loadWritableRootConfig(cfgPath)
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+
+	changed := 0
+	if len(root.Instances) > 0 {
+		for i := range root.Instances {
+			if root.Instances[i].Node.TrojanFallback != target {
+				root.Instances[i].Node.TrojanFallback = target
+				changed++
+			}
+		}
+	} else if root.Config.Panel.URL != "" || root.Config.Machine != nil {
+		if root.Config.Node.TrojanFallback != target {
+			root.Config.Node.TrojanFallback = target
+			changed++
+		}
+	} else {
+		return errors.New("config has no node instances to update")
+	}
+
+	if err := writeRootConfig(cfgPath, root); err != nil {
+		return fmt.Errorf("write config: %w", err)
+	}
+
+	if clear {
+		fmt.Printf("Cleared Trojan fallback in %s (%d instance(s) updated)\n", cfgPath, changed)
+	} else {
+		fmt.Printf("Set Trojan fallback to %s in %s (%d instance(s) updated)\n", target, cfgPath, changed)
+	}
+
+	if restart {
+		cmd := exec.Command("systemctl", "restart", serviceName)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			return fmt.Errorf("restart %s: %w\n%s", serviceName, err, strings.TrimSpace(string(out)))
+		}
+		fmt.Printf("Restarted %s\n", serviceName)
+	}
+
 	return nil
 }

@@ -408,6 +408,7 @@ func (s *Service) initialSetup(ctx context.Context) error {
 		}
 		return fmt.Errorf("initial config is nil")
 	}
+	s.applyLocalOverrides(bootstrap.Config)
 	kernelType, err := s.validateConfigForKernel(bootstrap.Config)
 	if err != nil {
 		return err
@@ -438,6 +439,24 @@ func (s *Service) initialSetup(ctx context.Context) error {
 	}
 	s.markMailboxReadyAndDrain(ctx)
 	return nil
+}
+
+// applyLocalOverrides merges node-local settings into the panel config. These
+// settings are intentionally kept outside the panel so operators can tune a
+// single node without changing backend protocol JSON.
+func (s *Service) applyLocalOverrides(nc *model.NodeSpec) {
+	if nc == nil || s == nil || s.cfg == nil {
+		return
+	}
+	fallback := strings.TrimSpace(s.cfg.Node.TrojanFallback)
+	if fallback == "" || !strings.EqualFold(nc.Protocol, "trojan") {
+		return
+	}
+	if nc.TLSSettings == nil {
+		nc.TLSSettings = map[string]interface{}{}
+	}
+	nc.TLSSettings["fallback"] = fallback
+	nlog.Core().Info("local trojan fallback override applied", "fallback", fallback)
 }
 
 // applyRemoteOverrides updates service-level settings (log level, cert config)
@@ -661,6 +680,7 @@ func (s *Service) handleWSEvent(ctx context.Context, event controlplane.Event) {
 		if event.Config == nil {
 			return
 		}
+		s.applyLocalOverrides(event.Config)
 		newConfigHash := computeConfigHash(event.Config)
 		if newConfigHash == s.lastConfigHash {
 			return
@@ -748,6 +768,7 @@ func (s *Service) pullViaAPIAsync(ctx context.Context) {
 		result := pullResult{certChanged: certChanged}
 		if snapshot.Config != nil {
 			result.config = snapshot.Config
+			s.applyLocalOverrides(result.config)
 			result.configHash = computeConfigHash(snapshot.Config)
 			if result.configHash == currentConfigHash && !certChanged {
 				result.config = nil

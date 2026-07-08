@@ -349,6 +349,34 @@ func TestValidateNodeRuntimeAllowsSingboxRealityWithRequiredFields(t *testing.T)
 	}
 }
 
+func TestApplyLocalOverridesTrojanFallback(t *testing.T) {
+	s := &Service{cfg: &config.Config{Node: config.NodeConfig{TrojanFallback: "127.0.0.1:8080"}}}
+	nc := &model.NodeSpec{
+		Protocol:    "trojan",
+		TLSSettings: map[string]any{"server_name": "sg3.oone.us"},
+	}
+
+	s.applyLocalOverrides(nc)
+
+	if got := nc.TLSSettings["fallback"]; got != "127.0.0.1:8080" {
+		t.Fatalf("fallback = %#v, want %q", got, "127.0.0.1:8080")
+	}
+	if got := nc.TLSSettings["server_name"]; got != "sg3.oone.us" {
+		t.Fatalf("server_name was overwritten: %#v", got)
+	}
+}
+
+func TestApplyLocalOverridesTrojanFallbackSkipsOtherProtocols(t *testing.T) {
+	s := &Service{cfg: &config.Config{Node: config.NodeConfig{TrojanFallback: "127.0.0.1:8080"}}}
+	nc := &model.NodeSpec{Protocol: "vless"}
+
+	s.applyLocalOverrides(nc)
+
+	if nc.TLSSettings != nil {
+		t.Fatalf("TLSSettings = %#v, want nil", nc.TLSSettings)
+	}
+}
+
 func TestValidateNodeRuntimeRejectsRealityWithoutTLSSettings(t *testing.T) {
 	err := validateNodeRuntime("singbox", []string{"vless"}, &model.NodeSpec{
 		Protocol: "vless",

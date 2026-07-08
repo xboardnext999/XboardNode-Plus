@@ -447,6 +447,7 @@ node:
   push_interval: 42
   pull_interval: 99
   access_report_interval: 7
+  trojan_fallback: "127.0.0.1:8080"
 instances:
   - panel:
       url: "https://panel.example.com"
@@ -488,6 +489,9 @@ instances:
 	}
 	if inst0.Node.AccessReportInterval != 7 {
 		t.Errorf("inst0 access_report_interval: got %d, want 7", inst0.Node.AccessReportInterval)
+	}
+	if inst0.Node.TrojanFallback != "127.0.0.1:8080" {
+		t.Errorf("inst0 trojan_fallback: got %q, want %q", inst0.Node.TrojanFallback, "127.0.0.1:8080")
 	}
 	// Instance 1: overrides log.level, inherits the rest.
 	inst1 := root.Instances[1]

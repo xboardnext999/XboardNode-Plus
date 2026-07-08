@@ -14,6 +14,9 @@
 #   level: "info"
 # node:
 #   access_report_interval: 3  # 最近访问目标快速上报间隔，单位秒
+#   # Trojan 本机伪装站 fallback，不需要在后台协议 JSON 里配置。
+#   # 常用值：127.0.0.1:8080，对应本机伪装网站监听端口。
+#   trojan_fallback: "127.0.0.1:8080"
 # instances:
 #   - panel:
 #       url: "https://panel.example.com"

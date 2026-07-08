@@ -107,6 +107,9 @@ type NodeConfig struct {
 	TrackInterval        int `yaml:"track_interval"`         // sec, default 10
 	DeviceReportInterval int `yaml:"device_report_interval"` // sec, default 30
 	AccessReportInterval int `yaml:"access_report_interval"` // sec, default 3
+	// TrojanFallback injects a local sing-box Trojan fallback target without
+	// requiring the panel-side protocol JSON to include tls_settings.fallback.
+	TrojanFallback string `yaml:"trojan_fallback,omitempty"`
 }
 
 // WSConfig holds WebSocket client tuning options.
@@ -474,6 +477,9 @@ func (c *Config) inheritFrom(parent *Config) {
 	}
 	if c.Node.AccessReportInterval == 0 {
 		c.Node.AccessReportInterval = parent.Node.AccessReportInterval
+	}
+	if c.Node.TrojanFallback == "" {
+		c.Node.TrojanFallback = parent.Node.TrojanFallback
 	}
 	// WS
 	if c.WS.StatusInterval == 0 {
