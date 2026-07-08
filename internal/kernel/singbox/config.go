@@ -617,6 +617,9 @@ func buildTrojan(base M, nc *model.NodeSpec, users []model.UserSpec, tc kernel.T
 	applyTransport(base, nc)
 	applyProxyProtocol(base, nc)
 	applyMultiplex(base, nc)
+	if fallback := buildTrojanFallback(nc); fallback != nil {
+		base["fallback"] = fallback
+	}
 
 	if nc.TLS == 1 {
 		if tls := buildTLSConfig(nc, tc); tls != nil {
@@ -638,6 +641,133 @@ func buildTrojan(base M, nc *model.NodeSpec, users []model.UserSpec, tc kernel.T
 	}
 
 	return base
+}
+
+func buildTrojanFallback(nc *model.NodeSpec) M {
+	if nc == nil || nc.TLSSettings == nil {
+		return nil
+	}
+	if raw, ok := nc.TLSSettings["fallback"]; ok {
+		return normalizeTrojanFallback(raw)
+	}
+
+	server := strings.TrimSpace(stringFromAny(nc.TLSSettings["fallback_server"]))
+	port := intFromAny(nc.TLSSettings["fallback_port"])
+	if server == "" {
+		return nil
+	}
+	if port == 0 {
+		return parseTrojanFallbackAddress(server)
+	}
+	return makeTrojanFallback(server, port)
+}
+
+func normalizeTrojanFallback(raw any) M {
+	switch v := raw.(type) {
+	case string:
+		return parseTrojanFallbackAddress(v)
+	case map[string]any:
+		return normalizeTrojanFallbackMap(v)
+	case map[string]string:
+		m := make(map[string]any, len(v))
+		for key, value := range v {
+			m[key] = value
+		}
+		return normalizeTrojanFallbackMap(m)
+	default:
+		return nil
+	}
+}
+
+func normalizeTrojanFallbackMap(raw map[string]any) M {
+	server := strings.TrimSpace(stringFromAny(firstMapValue(raw, "server", "host", "address")))
+	port := intFromAny(firstMapValue(raw, "server_port", "port"))
+	if server == "" {
+		return nil
+	}
+	if port == 0 {
+		return parseTrojanFallbackAddress(server)
+	}
+	return makeTrojanFallback(server, port)
+}
+
+func parseTrojanFallbackAddress(addr string) M {
+	addr = strings.TrimSpace(addr)
+	if addr == "" {
+		return nil
+	}
+	host, portStr, err := net.SplitHostPort(addr)
+	if err != nil {
+		parts := strings.Split(addr, ":")
+		if len(parts) != 2 {
+			return nil
+		}
+		host, portStr = parts[0], parts[1]
+	}
+	port, err := strconv.Atoi(strings.TrimSpace(portStr))
+	if err != nil {
+		return nil
+	}
+	return makeTrojanFallback(host, port)
+}
+
+func makeTrojanFallback(server string, port int) M {
+	server = strings.TrimSpace(server)
+	if server == "" || port <= 0 || port > 65535 {
+		return nil
+	}
+	return M{
+		"server":      server,
+		"server_port": port,
+	}
+}
+
+func firstMapValue(m map[string]any, keys ...string) any {
+	for _, key := range keys {
+		if value, ok := m[key]; ok {
+			return value
+		}
+	}
+	return nil
+}
+
+func stringFromAny(value any) string {
+	switch v := value.(type) {
+	case string:
+		return v
+	case fmt.Stringer:
+		return v.String()
+	case nil:
+		return ""
+	default:
+		return fmt.Sprintf("%v", v)
+	}
+}
+
+func intFromAny(value any) int {
+	switch v := value.(type) {
+	case int:
+		return v
+	case int32:
+		return int(v)
+	case int64:
+		return int(v)
+	case uint:
+		return int(v)
+	case uint32:
+		return int(v)
+	case uint64:
+		return int(v)
+	case float32:
+		return int(v)
+	case float64:
+		return int(v)
+	case string:
+		i, _ := strconv.Atoi(strings.TrimSpace(v))
+		return i
+	default:
+		return 0
+	}
 }
 
 func buildHysteria(base M, nc *model.NodeSpec, users []model.UserSpec, tc kernel.TLSCert) M {

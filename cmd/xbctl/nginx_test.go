@@ -76,3 +76,66 @@ func TestRunNginxTrojanSNIWriteDefaultsToSnippet(t *testing.T) {
 		t.Fatalf("rendered snippet missing map:\n%s", got)
 	}
 }
+
+func TestRenderNginxCamouflageSite(t *testing.T) {
+	got, err := renderNginxCamouflageSite(nginxCamouflageOptions{
+		Domain: "sg3.oone.us",
+		Listen: "127.0.0.1:8080",
+		Root:   "/var/www/xboard-node-camouflage",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, want := range []string{
+		"server_name sg3.oone.us;",
+		"listen 127.0.0.1:8080;",
+		"root /var/www/xboard-node-camouflage;",
+		"try_files $uri $uri/ /index.html;",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("rendered camouflage config missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestSelectCamouflageTemplateRejectsUnknown(t *testing.T) {
+	_, err := selectCamouflageTemplate("missing")
+	if err == nil {
+		t.Fatal("expected unknown template error")
+	}
+}
+
+func TestRunNginxCamouflageSiteWritesConfigAndIndex(t *testing.T) {
+	dir := t.TempDir()
+	root := filepath.Join(dir, "site")
+	output := filepath.Join(dir, "camouflage.conf")
+
+	err := runNginxCamouflageSite([]string{
+		"--domain", "sg3.oone.us",
+		"--template", "cloud",
+		"--root", root,
+		"--output", output,
+		"--write",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	confRaw, err := os.ReadFile(output)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(confRaw), "server_name sg3.oone.us;") {
+		t.Fatalf("written config missing domain:\n%s", string(confRaw))
+	}
+
+	indexRaw, err := os.ReadFile(filepath.Join(root, "index.html"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	index := string(indexRaw)
+	if !strings.Contains(index, "Edge Cloud Platform") || !strings.Contains(index, "sg3.oone.us") {
+		t.Fatalf("written index missing template/domain:\n%s", index)
+	}
+}

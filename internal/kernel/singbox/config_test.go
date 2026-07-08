@@ -332,6 +332,41 @@ func TestBuildInbound_Trojan_WithTLS(t *testing.T) {
 	assertMapValue(t, tls, "enabled", true)
 }
 
+func TestBuildInbound_TrojanFallbackFromTLSSettings(t *testing.T) {
+	nc := &panel.NodeConfig{
+		Protocol:   "trojan",
+		ServerPort: 10443,
+		TLS:        1,
+		ServerName: "sg3.oone.us",
+		TLSSettings: map[string]interface{}{
+			"fallback": "127.0.0.1:8080",
+		},
+	}
+	inbound := buildInbound(testNodeSpec(nc), testUsers, kernel.TLSCert{CertPEM: []byte("CERT"), KeyPEM: []byte("KEY")})
+	fallback := inbound["fallback"].(M)
+	assertMapValue(t, fallback, "server", "127.0.0.1")
+	assertMapValue(t, fallback, "server_port", 8080)
+}
+
+func TestBuildInbound_TrojanFallbackFromTLSSettingsMap(t *testing.T) {
+	nc := &panel.NodeConfig{
+		Protocol:   "trojan",
+		ServerPort: 10443,
+		TLS:        1,
+		ServerName: "sg3.oone.us",
+		TLSSettings: map[string]interface{}{
+			"fallback": map[string]interface{}{
+				"server":      "127.0.0.1",
+				"server_port": "8081",
+			},
+		},
+	}
+	inbound := buildInbound(testNodeSpec(nc), testUsers, kernel.TLSCert{CertPEM: []byte("CERT"), KeyPEM: []byte("KEY")})
+	fallback := inbound["fallback"].(M)
+	assertMapValue(t, fallback, "server", "127.0.0.1")
+	assertMapValue(t, fallback, "server_port", 8081)
+}
+
 // --- Hysteria ---
 
 func TestBuildInbound_Hysteria2(t *testing.T) {

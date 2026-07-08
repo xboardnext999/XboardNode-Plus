@@ -28,9 +28,11 @@ type nginxTrojanSNIOptions struct {
 
 func runNginx(args []string) error {
 	if len(args) == 0 {
-		return errors.New("usage: xbctl nginx <trojan-sni>")
+		return errors.New("usage: xbctl nginx <trojan-sni|camouflage-site>")
 	}
 	switch args[0] {
+	case "camouflage-site":
+		return runNginxCamouflageSite(args[1:])
 	case "trojan-sni":
 		return runNginxTrojanSNI(args[1:])
 	default:
